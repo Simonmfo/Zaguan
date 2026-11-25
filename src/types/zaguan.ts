@@ -118,6 +118,9 @@ export interface QrPass {
   guestName: string;
   typeLabel: string;
   validityLabel: string;
+  hoursValid?: number;
+  validUntilIso?: string;
+  magicLink?: string;
   timeWindow?: string;
   accessScope: string;
   singleUse: boolean;
@@ -141,6 +144,7 @@ export interface RecurringPass {
   unit: string;
   pin: string;
   rfidTag: string;
+  mobileAccessEnabled: boolean;
   days: DayOfWeek[];
   startTime: string;
   endTime: string;

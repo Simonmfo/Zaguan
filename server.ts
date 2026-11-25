@@ -201,6 +201,62 @@ app.get('/api/akuvox/events', (req, res) => {
   res.json({ events: newer });
 });
 
+// 6. Sesión de audio bidireccional SIP/WebRTC para el botón [Hablar] de la App Residente
+app.post('/api/akuvox/sip-talk', (req, res) => {
+  const { action = 'start', unit = '4B', message = '' } = req.body ?? {};
+  recordEvent('call_start', {
+    action: String(action),
+    unit: String(unit),
+    message: String(message).slice(0, 160),
+  });
+  res.json({
+    ok: true,
+    channel: action === 'start' ? 'SIP_FULL_DUPLEX_ACTIVE' : 'SIP_CLOSED',
+    codec: 'G.722/16000 (AEC)',
+  });
+});
+
+// 7. Validación estricta de horarios/permisos para pases QR/PIN/RFID desde el E12W
+app.post('/api/akuvox/validate-pass', (req, res) => {
+  const { credential, passType = 'one_time', validUntilIso, days = [], startTime, endTime } =
+    req.body ?? {};
+
+  if (!credential) {
+    res.status(400).json({ granted: false, reason: 'Falta credencial.' });
+    return;
+  }
+
+  if (validUntilIso && new Date(validUntilIso).getTime() <= Date.now()) {
+    res.json({ granted: false, reason: 'Pase expirado por ventana horaria.' });
+    return;
+  }
+
+  if (passType === 'recurring_schedule') {
+    const now = new Date();
+    const dayMap = ['D', 'L', 'M', 'X', 'J', 'V', 'S'];
+    const today = dayMap[now.getDay()];
+    const curMin = now.getHours() * 60 + now.getMinutes();
+    const parseMin = (t: string) => {
+      const [h, m] = String(t || '').split(':').map(Number);
+      return Number.isFinite(h) && Number.isFinite(m) ? h * 60 + m : -1;
+    };
+    const sMin = parseMin(startTime);
+    const eMin = parseMin(endTime);
+    if (!Array.isArray(days) || !days.includes(today) || curMin < sMin || curMin > eMin) {
+      res.json({
+        granted: false,
+        reason: `Bloqueado fuera de franja horaria (${today} ${now.getHours()}:${String(
+          now.getMinutes()
+        ).padStart(2, '0')}).`,
+      });
+      return;
+    }
+  }
+
+  recordEvent('rfid_scan', { credential: String(credential), granted: 'true' });
+  res.json({ granted: true, reason: 'Permiso validado.' });
+});
+
 app.listen(PORT, '0.0.0.0', () => {
   console.log(`Zaguán Digital — Puente Akuvox E12W activo en http://0.0.0.0:${PORT}`);
   console.log(`  • Third-Party QR Webhook: http://<TU_IP>:${PORT}/api/akuvox/webhook/qr?codeKey={QRCode}&deviceId={DeviceID}`);

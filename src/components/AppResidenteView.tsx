@@ -1,6 +1,19 @@
 import { FormEvent, useEffect, useState } from 'react';
 import { ASSETS, BUILDING_INFO, PASS_TYPE_PRESETS } from '../data/zaguanData';
 import {
+  BleProximityState,
+  estimateDistanceFromRssi,
+  getInitialBleState,
+  performBleProximityUnlock,
+} from '../services/bleAccessService';
+import {
+  NfcHceSession,
+  buildResidentHceUid,
+  detectNfcHceCapabilities,
+  startNfcHceEmulation,
+  stopNfcHceEmulation,
+} from '../services/nfcHceService';
+import {
   ActivityEvent,
   BuildingNotice,
   DayOfWeek,
@@ -17,7 +30,13 @@ import {
   ResidentTab,
   UnannouncedParcelRule,
 } from '../types/zaguan';
+import {
+  buildMagicLinkUrl,
+  buildWhatsAppShareHref,
+  validateRecurringConfig,
+} from '../utils/accessValidation';
 import { SmartImage, ZaguanLogoMark } from './BrandMark';
+import { IncomingDoorbellModal } from './IncomingDoorbellModal';
 import { QrPreviewSvg } from './QrPreviewSvg';
 
 type AccessSubTab = 'un-uso' | 'recurrentes' | 'coaccion';
@@ -35,7 +54,10 @@ interface AppResidenteViewProps {
   unannouncedRule: UnannouncedParcelRule;
   onChangeUnannouncedRule: (rule: UnannouncedParcelRule) => void;
   pendingVisit: PendingVisitRequest | null;
+  liveSnapshotUrl?: string | null;
   onRespondVisit: (approved: boolean) => void;
+  onSimulateIncomingDoorbell: () => void;
+  onSendDoorbellVoiceReply: (text: string) => void;
   pendingSpontaneous: PendingSpontaneousParcel | null;
   onRespondSpontaneousParcel: (action: 'authorize' | 'reject' | 'timeout-auto') => void;
   residentPin: string;
@@ -43,10 +65,12 @@ interface AppResidenteViewProps {
   onUpdateResidentPin: (newPin: string) => void;
   door1Countdown: number;
   door2Countdown: number;
-  onUnlockDirectDoor: (method: 'app' | 'bt-nfc') => void;
+  onUnlockDirectDoor: (method: 'app' | 'bt-nfc', detail?: string) => void;
   onCreatePass: (pass: QrPass) => void;
   onRevokePass: (id: string) => void;
-  onCreateRecurringPass: (staff: Omit<RecurringPass, 'id' | 'status' | 'currentlyInside' | 'auditLog'>) => void;
+  onCreateRecurringPass: (
+    staff: Omit<RecurringPass, 'id' | 'status' | 'currentlyInside' | 'auditLog'>
+  ) => void;
   onRevokeRecurringPass: (id: string) => void;
   onToggleStaffShift: (id: string) => void;
   onCreatePreAuthParcel: (carrier: string, description: string, mode: ParcelStorageMode) => void;
@@ -72,7 +96,10 @@ export function AppResidenteView({
   unannouncedRule,
   onChangeUnannouncedRule,
   pendingVisit,
+  liveSnapshotUrl,
   onRespondVisit,
+  onSimulateIncomingDoorbell,
+  onSendDoorbellVoiceReply,
   pendingSpontaneous,
   onRespondSpontaneousParcel,
   residentPin,
@@ -94,31 +121,44 @@ export function AppResidenteView({
   onNavigateMain,
 }: AppResidenteViewProps) {
   const [toastMessage, setToastMessage] = useState<string | null>(null);
+  const [staffPushBanner, setStaffPushBanner] = useState<{
+    title: string;
+    detail: string;
+    time: string;
+  } | null>(null);
   const [inlineQrOpen, setInlineQrOpen] = useState(false);
   const [inicioSubTab, setInicioSubTab] = useState<InicioSubTab>('actividad');
   const [accessSubTab, setAccessSubTab] = useState<AccessSubTab>('un-uso');
   const [barbacoaReserved, setBarbacoaReserved] = useState(false);
   const [gateCountdown, setGateCountdown] = useState(0);
-  const [bluetoothNear, setBluetoothNear] = useState(true);
 
-  // WhatsApp Guest Link preview modal
+  // Modular NFC HCE (Android 13.56 MHz) & Universal BLE 5.0 (iOS/Android) state
+  const [nfcCapabilities] = useState(() => detectNfcHceCapabilities());
+  const [nfcSession, setNfcSession] = useState<NfcHceSession | null>(null);
+  const [bleState, setBleState] = useState<BleProximityState>(() => getInitialBleState());
+
+  // WhatsApp Guest Magic Link preview modal
   const [sharedPassPreview, setSharedPassPreview] = useState<QrPass | null>(null);
+  const [copiedMagicLink, setCopiedMagicLink] = useState(false);
 
-  // Single-use QR/PIN generator state
+  // Single-use Visit Pass form (name + hours validity -> 4-digit voice code + magic_link)
   const [passType, setPassType] = useState<PassTypeKey>('visita');
   const [guestName, setGuestName] = useState(PASS_TYPE_PRESETS.visita.defaultName);
-  const [guestDuration, setGuestDuration] = useState(PASS_TYPE_PRESETS.visita.defaultDuration);
-  const [previewCode, setPreviewCode] = useState(PASS_TYPE_PRESETS.visita.defaultCode);
+  const [hoursValid, setHoursValid] = useState<number>(2);
   const [previewPin, setPreviewPin] = useState(PASS_TYPE_PRESETS.visita.defaultPin);
+  const [previewCode, setPreviewCode] = useState(PASS_TYPE_PRESETS.visita.defaultCode);
   const [previewSummary, setPreviewSummary] = useState(PASS_TYPE_PRESETS.visita.summary);
 
-  // Recurring staff creation form
+  // Recurring staff creation form with strict validation & physical RFID UID binding
   const [showAddStaff, setShowAddStaff] = useState(false);
   const [staffName, setStaffName] = useState('');
   const [staffRole, setStaffRole] = useState<RecurringPass['role']>('Limpieza');
   const [staffDays, setStaffDays] = useState<DayOfWeek[]>(['M', 'J']);
   const [staffStart, setStaffStart] = useState('08:00');
   const [staffEnd, setStaffEnd] = useState('13:00');
+  const [staffRfidUid, setStaffRfidUid] = useState('');
+  const [staffMobileAccess, setStaffMobileAccess] = useState(true);
+  const [staffFormError, setStaffFormError] = useState<string | null>(null);
 
   // Duress PIN editor
   const [pinDraft, setPinDraft] = useState(residentPin);
@@ -145,6 +185,21 @@ export function AppResidenteView({
     setToastMessage(msg);
   };
 
+  const emitResidentPush = (title: string, detail: string) => {
+    setStaffPushBanner({ title, detail, time: nowTime() });
+    if (
+      typeof window !== 'undefined' &&
+      'Notification' in window &&
+      Notification.permission === 'granted'
+    ) {
+      try {
+        new Notification(title, { body: detail });
+      } catch {
+        // Ignore browser notification restrictions
+      }
+    }
+  };
+
   const pendingParcels = parcels.filter((p) => p.status === 'Para retirar');
   const primaryParcel = parcels[0];
   const historyParcels = parcels.slice(1);
@@ -153,13 +208,59 @@ export function AppResidenteView({
     (p) => p.status === 'Esperando' && p.unit === BUILDING_INFO.activeUnit
   );
 
-  const handleOpenDoor = (method: 'app' | 'bt-nfc') => {
-    onUnlockDirectDoor(method);
-    showFeedback(
-      method === 'bt-nfc'
-        ? 'Puerta desbloqueada por Bluetooth/NFC (Proximidad 1.2m)'
-        : 'Puerta principal desbloqueada por 8 seg'
+  // Direct Quick Open (Primary button)
+  const handleQuickOpenDoor = () => {
+    onUnlockDirectDoor('app', 'Botón rápido de apertura directa · Akuvox E12W Relé 1');
+    showFeedback('Puerta abierta al instante (Akuvox E12W · 8 seg)');
+  };
+
+  // Modular BLE 5.0 Proximity Unlock (Universal iOS & Android)
+  const handleBleUnlock = async () => {
+    const result = await performBleProximityUnlock({
+      unit: BUILDING_INFO.activeUnit,
+      residentName: BUILDING_INFO.activeResident,
+      state: bleState,
+    });
+    if (!result.ok) {
+      showFeedback(result.message);
+      return;
+    }
+    onUnlockDirectDoor('bt-nfc', result.message);
+    showFeedback(result.message);
+  };
+
+  const handleToggleBleRange = () => {
+    setBleState((prev) => {
+      const nextInRange = !prev.inRange;
+      const rssiDbm = nextInRange ? -56 : -84;
+      return {
+        ...prev,
+        inRange: nextInRange,
+        rssiDbm,
+        estimatedMeters: estimateDistanceFromRssi(rssiDbm),
+      };
+    });
+  };
+
+  // Modular Android NFC HCE 13.56 MHz Emulation
+  const handleToggleNfcHce = async () => {
+    if (nfcSession?.active) {
+      await stopNfcHceEmulation();
+      setNfcSession(null);
+      showFeedback('Emulación NFC HCE 13.56 MHz detenida');
+      return;
+    }
+    const session = await startNfcHceEmulation({
+      unit: BUILDING_INFO.activeUnit,
+      pin: residentPin,
+      sessionToken: `hce-${Date.now()}`,
+    });
+    setNfcSession(session);
+    onUnlockDirectDoor(
+      'bt-nfc',
+      `NFC HCE 13.56 MHz emulado (${session.emulatedUid}) → Lector Akuvox E12W`
     );
+    showFeedback(`NFC HCE activo: UID ${session.emulatedUid} acercado al E12W`);
   };
 
   const handleOpenGate = () => {
@@ -178,27 +279,48 @@ export function AppResidenteView({
     showFeedback('Alerta SOS silenciosa enviada con audio/video y geolocalización');
   };
 
-  const handleQuickPass = (type: PassTypeKey) => {
+  const buildSingleUsePass = (
+    name: string,
+    type: PassTypeKey,
+    hrs: number,
+    pinOverride?: string,
+    codeOverride?: string
+  ): QrPass => {
     const preset = PASS_TYPE_PRESETS[type];
-    const randomPin = String(Math.floor(1000 + Math.random() * 8999));
-    const randomCode = `ZAG-${randomPin}`;
-    const created: QrPass = {
+    const pin = pinOverride || String(Math.floor(1000 + Math.random() * 8999));
+    const code = codeOverride || `ZAG-${pin}`;
+    const validUntilDate = new Date(Date.now() + hrs * 3600 * 1000);
+    const validUntilClock = validUntilDate.toLocaleTimeString('es-UY', {
+      hour: '2-digit',
+      minute: '2-digit',
+    });
+    const validityLabel = `${hrs} ${hrs === 1 ? 'hora' : 'horas'} (hasta ${validUntilClock} hs)`;
+    return {
       id: `pass-${Date.now()}`,
-      code: randomCode,
-      pin: randomPin,
-      guestName: preset.defaultName,
+      code,
+      pin,
+      guestName: name,
       typeLabel: preset.label,
-      validityLabel: preset.defaultDuration,
-      timeWindow: preset.defaultWindow,
+      validityLabel,
+      hoursValid: hrs,
+      validUntilIso: validUntilDate.toISOString(),
+      magicLink: buildMagicLinkUrl(code),
+      timeWindow: `Válido ${validityLabel} · 1 solo uso (código de voz + QR)`,
       accessScope: preset.scope,
       singleUse: true,
       status: 'Activo',
-      detailText: `1 uso · ${preset.defaultDuration} · PIN ${randomPin}`,
+      detailText: `1 uso · ${hrs}h (hasta ${validUntilClock}) · Voz ${pin}`,
       unit: BUILDING_INFO.activeUnit,
     };
+  };
+
+  const handleQuickPass = (type: PassTypeKey) => {
+    const preset = PASS_TYPE_PRESETS[type];
+    const hrs = type === 'pedidosya' ? 1 : type === 'mercadolibre' ? 2 : 4;
+    const created = buildSingleUsePass(preset.defaultName, type, hrs);
     onCreatePass(created);
     setSharedPassPreview(created);
-    showFeedback(`Link WhatsApp + QR/PIN ${randomPin} creado en 2 toques`);
+    showFeedback(`Pase creado en 2 toques · Código voz ${created.pin} + Magic Link`);
     setInlineQrOpen(false);
   };
 
@@ -206,32 +328,19 @@ export function AppResidenteView({
     const preset = PASS_TYPE_PRESETS[type];
     setPassType(type);
     setGuestName(preset.defaultName);
-    setGuestDuration(preset.defaultDuration);
+    setHoursValid(type === 'pedidosya' ? 1 : type === 'mercadolibre' ? 2 : 4);
     setPreviewCode(preset.defaultCode);
     setPreviewPin(preset.defaultPin);
     setPreviewSummary(preset.summary);
   };
 
-  const handleSendWhatsAppQr = () => {
-    const cleanName = guestName.trim() || 'Invitado';
-    const preset = PASS_TYPE_PRESETS[passType];
-    const created: QrPass = {
-      id: `pass-${Date.now()}`,
-      code: previewCode,
-      pin: previewPin,
-      guestName: cleanName,
-      typeLabel: preset.label,
-      validityLabel: guestDuration,
-      timeWindow: `Válido ${guestDuration} · 1 solo uso (se destruye al entrar)`,
-      accessScope: preset.scope,
-      singleUse: true,
-      status: 'Activo',
-      detailText: `1 uso · ${guestDuration} · PIN ${previewPin}`,
-      unit: BUILDING_INFO.activeUnit,
-    };
+  const handleCreateSingleUsePass = (e: FormEvent) => {
+    e.preventDefault();
+    const cleanName = guestName.trim() || 'Visita';
+    const created = buildSingleUsePass(cleanName, passType, hoursValid, previewPin, previewCode);
     onCreatePass(created);
     setSharedPassPreview(created);
-    showFeedback(`Link WhatsApp enviado a ${cleanName} (QR + PIN ${previewPin})`);
+    showFeedback(`Código de voz ${created.pin} y Magic Link listos para ${cleanName}`);
     const nextPin = String(Math.floor(1000 + Math.random() * 8999));
     setPreviewPin(nextPin);
     setPreviewCode(`ZAG-${nextPin}`);
@@ -239,21 +348,36 @@ export function AppResidenteView({
 
   const handleCreateStaffSubmit = (e: FormEvent) => {
     e.preventDefault();
-    if (!staffName.trim() || staffDays.length === 0) return;
+    const check = validateRecurringConfig({
+      name: staffName,
+      days: staffDays,
+      startTime: staffStart,
+      endTime: staffEnd,
+      rfidTag: staffRfidUid,
+      mobileAccessEnabled: staffMobileAccess,
+    });
+    if (!check.valid) {
+      setStaffFormError(check.error || 'Revisá los horarios y permisos.');
+      return;
+    }
+    setStaffFormError(null);
     const newPin = String(Math.floor(1000 + Math.random() * 8999));
-    const rfid = `RF-4B${staffName.trim().charAt(0).toUpperCase()}${Math.floor(10 + Math.random() * 89)}`;
     onCreateRecurringPass({
       name: staffName.trim(),
       role: staffRole,
       unit: BUILDING_INFO.activeUnit,
       pin: newPin,
-      rfidTag: rfid,
+      rfidTag: check.normalizedRfid,
+      mobileAccessEnabled: staffMobileAccess,
       days: staffDays,
       startTime: staffStart,
       endTime: staffEnd,
     });
-    showFeedback(`Acceso recurrente creado para ${staffName.trim()} (PIN ${newPin} / ${rfid})`);
+    showFeedback(
+      `Permiso recurrente creado para ${staffName.trim()} (${staffDays.join('/')} ${staffStart}–${staffEnd})`
+    );
     setStaffName('');
+    setStaffRfidUid('');
     setShowAddStaff(false);
   };
 
@@ -263,12 +387,27 @@ export function AppResidenteView({
     );
   };
 
+  const handleStaffShiftClick = (staff: RecurringPass) => {
+    onToggleStaffShift(staff.id);
+    if (!staff.currentlyInside) {
+      emitResidentPush(
+        `Ingreso de personal · ${staff.name} (${staff.role})`,
+        `Ingresó a las ${nowTime()} hs · ${staff.rfidTag ? `RFID ${staff.rfidTag}` : 'Acceso móvil NFC/BLE'}`
+      );
+    } else {
+      emitResidentPush(
+        `Egreso de personal · ${staff.name} (${staff.role})`,
+        `Salió a las ${nowTime()} hs · Jornada auditada registrada en historial`
+      );
+    }
+  };
+
   const handlePreAuthSubmit = (e: FormEvent) => {
     e.preventDefault();
     const desc = preAuthDesc.trim() || `Envío ${preAuthCarrier} esperado hoy`;
     onCreatePreAuthParcel(preAuthCarrier, desc, preAuthMode);
     showFeedback(
-      `Pre-autorizado: ${preAuthCarrier} (${preAuthMode === 'locker' ? 'Locker' : 'Zaguán'}) · IA validará por OCR sin molestarte`
+      `Pre-autorizado: ${preAuthCarrier} (${preAuthMode === 'locker' ? 'Locker' : 'Zaguán'}) · OCR IA activo`
     );
     setPreAuthDesc('');
   };
@@ -300,17 +439,19 @@ export function AppResidenteView({
 
   const headerTitle =
     activeTab === 'accesos'
-      ? 'Accesos y PIN'
+      ? 'Pases y Accesos'
       : activeTab === 'paquetes'
         ? 'Paquetería IA'
         : activeTab === 'consorcio'
           ? 'Edificio'
           : 'Zaguán App';
 
+  const residentHceUid = buildResidentHceUid(BUILDING_INFO.activeUnit, residentPin);
+
   return (
     <main className="flex-1 bg-surface-container-low">
       <div className="max-w-[1200px] mx-auto lg:px-page-margin lg:py-8 grid grid-cols-1 lg:grid-cols-12 gap-gutter-xl items-start">
-        {/* Mobile App Frame (authentic 390px mobile experience) */}
+        {/* Mobile App Frame (390px Resident App) */}
         <div className="lg:col-span-5 flex justify-center">
           <div className="w-full max-w-[390px] min-h-[calc(100vh-4rem)] lg:min-h-[780px] lg:max-h-[840px] bg-surface lg:border lg:border-outline-variant lg:rounded-lg lg:shadow-sm flex flex-col relative overflow-hidden">
             {/* App Top Header */}
@@ -326,7 +467,7 @@ export function AppResidenteView({
                       {headerTitle}
                     </h1>
                     <span className="inline-flex items-center px-2 py-0.5 rounded-sm bg-success-container text-on-success-container font-label text-label-sm whitespace-nowrap shrink-0">
-                      IA 24/7
+                      E12W
                     </span>
                   </div>
                 </div>
@@ -336,7 +477,7 @@ export function AppResidenteView({
                 type="button"
                 onClick={handleTriggerPanic}
                 aria-label="Botón de pánico y coacción"
-                className="inline-flex items-center gap-1 px-2.5 py-2 min-h-[40px] rounded bg-error-container text-on-error-container font-label text-label-sm hover:opacity-90 transition-opacity duration-150 whitespace-nowrap shrink-0 cursor-pointer"
+                className="inline-flex items-center gap-1 px-2.5 py-2 min-h-[40px] rounded bg-error-container text-on-error-container font-label text-label-sm hover:opacity-90 whitespace-nowrap shrink-0 cursor-pointer"
               >
                 <span className="material-symbols-outlined text-title-md" aria-hidden="true">
                   emergency_share
@@ -347,52 +488,42 @@ export function AppResidenteView({
 
             {/* Scrollable Mobile Content */}
             <div className="flex-1 overflow-y-auto px-4 pt-4 pb-24 flex flex-col gap-3.5">
-              {/* Live Incoming AI Visit Push Banner */}
-              {pendingVisit && pendingVisit.status === 'Pendiente' && (
-                <div className="p-3 rounded-md bg-primary text-on-primary flex flex-col gap-2.5 shadow">
-                  <div className="flex items-center gap-2.5">
-                    <SmartImage
-                      src={pendingVisit.photoUrl}
-                      alt="Foto en vivo de visita en puerta"
-                      className="w-12 h-12 rounded object-cover border border-white/30 shrink-0"
-                      fallbackIcon="person"
-                      fallbackLabel="Visita"
-                    />
+              {/* Live Staff Check-In / Check-Out Push Notification Card */}
+              {staffPushBanner && (
+                <div
+                  role="status"
+                  className="p-3 rounded-md bg-primary text-on-primary flex items-start justify-between gap-2 shadow"
+                >
+                  <div className="flex items-start gap-2 min-w-0">
+                    <span className="material-symbols-outlined text-title-md text-inverse-primary shrink-0 mt-0.5" aria-hidden="true">
+                      notifications_active
+                    </span>
                     <div className="min-w-0">
-                      <span className="font-mono text-mono-sm text-inverse-primary">
-                        PORTERO IA · FOTO EN VIVO
+                      <span className="font-mono text-[10px] text-inverse-primary uppercase block">
+                        NOTIFICACIÓN PUSH · {staffPushBanner.time} hs
                       </span>
-                      <p className="font-label text-label-md text-white leading-tight">
-                        {pendingVisit.visitorName} busca a {pendingVisit.residentName} ({pendingVisit.unit})
+                      <p className="font-label text-label-md text-white leading-snug">
+                        {staffPushBanner.title}
+                      </p>
+                      <p className="font-body text-body-sm text-white/80">
+                        {staffPushBanner.detail}
                       </p>
                     </div>
                   </div>
-                  <div className="grid grid-cols-2 gap-2">
-                    <button
-                      type="button"
-                      onClick={() => {
-                        onRespondVisit(true);
-                        showFeedback(`Puerta abierta para ${pendingVisit.visitorName}`);
-                      }}
-                      className="py-2 rounded bg-secondary text-on-secondary font-label text-label-md cursor-pointer"
-                    >
-                      Abrir Puerta
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        onRespondVisit(false);
-                        showFeedback(`Visita de ${pendingVisit.visitorName} rechazada`);
-                      }}
-                      className="py-2 rounded bg-white/15 text-white font-label text-label-md cursor-pointer"
-                    >
-                      Rechazar
-                    </button>
-                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setStaffPushBanner(null)}
+                    aria-label="Descartar push"
+                    className="text-white/75 hover:text-white p-0.5 shrink-0 cursor-pointer"
+                  >
+                    <span className="material-symbols-outlined text-sm" aria-hidden="true">
+                      close
+                    </span>
+                  </button>
                 </div>
               )}
 
-              {/* Live Spontaneous Parcel Push Banner (20s countdown) */}
+              {/* Live Spontaneous Parcel Push Banner */}
               {pendingSpontaneous && pendingSpontaneous.status === 'Esperando' && (
                 <div className="p-3 rounded-md bg-warning-container text-on-warning-container border border-warning flex flex-col gap-2">
                   <div className="flex items-center justify-between">
@@ -430,7 +561,7 @@ export function AppResidenteView({
                 </div>
               )}
 
-              {/* Live Feedback Banner */}
+              {/* Toast Feedback */}
               {toastMessage && (
                 <div
                   role="status"
@@ -446,7 +577,7 @@ export function AppResidenteView({
                     type="button"
                     onClick={() => setToastMessage(null)}
                     aria-label="Cerrar aviso"
-                    className="text-on-success-container hover:opacity-75 p-1 shrink-0 cursor-pointer"
+                    className="text-on-success-container p-1 shrink-0 cursor-pointer"
                   >
                     <span className="material-symbols-outlined text-sm" aria-hidden="true">
                       close
@@ -455,103 +586,123 @@ export function AppResidenteView({
                 </div>
               )}
 
-              {/* TAB 1: INICIO */}
+              {/* TAB 1: INICIO (Apertura Directa + NFC HCE + BLE 5.0 + 2 Toques) */}
               {activeTab === 'inicio' && (
                 <>
-                  {/* Direct Bluetooth / NFC Proximity Bar */}
-                  <section className="bg-surface-container-lowest border border-outline-variant rounded-md p-3 flex items-center justify-between gap-2">
-                    <div className="flex items-center gap-2.5 min-w-0">
-                      <span
-                        className={`w-9 h-9 rounded-full inline-flex items-center justify-center shrink-0 ${
-                          bluetoothNear
-                            ? 'bg-secondary-container text-on-secondary-container'
-                            : 'bg-surface-container text-on-surface-variant'
-                        }`}
-                      >
-                        <span className="material-symbols-outlined text-title-lg" aria-hidden="true">
-                          nfc
-                        </span>
-                      </span>
-                      <div className="min-w-0">
-                        <p className="font-label text-label-md text-on-surface truncate">
-                          {bluetoothNear ? 'Bluetooth / NFC cerca (1.2m)' : 'Fuera de rango BT/NFC'}
-                        </p>
-                        <button
-                          type="button"
-                          onClick={() => setBluetoothNear((b) => !b)}
-                          className="font-body text-body-sm text-primary hover:underline cursor-pointer"
-                        >
-                          {bluetoothNear ? 'Simular alejarse' : 'Simular acercarse'}
-                        </button>
-                      </div>
-                    </div>
-                    <button
-                      type="button"
-                      disabled={!bluetoothNear}
-                      onClick={() => handleOpenDoor('bt-nfc')}
-                      className={`px-3 py-2 rounded font-label text-label-sm whitespace-nowrap shrink-0 transition-colors ${
-                        bluetoothNear
-                          ? 'bg-secondary text-on-secondary hover:opacity-90 cursor-pointer'
-                          : 'bg-surface-container text-on-surface-variant cursor-not-allowed'
-                      }`}
-                    >
-                      Abrir BT/NFC
-                    </button>
-                  </section>
-
-                  {/* Live Lobby Camera & Direct Door/Garage Controls */}
+                  {/* HERO PRIMARY QUICK-OPEN CARD */}
                   <section className="bg-surface-container-lowest border border-outline-variant rounded-md overflow-hidden flex flex-col">
                     <div className="relative">
                       <SmartImage
-                        src={ASSETS.lobbyCamera}
-                        alt="Cámara en vivo del acceso principal del edificio"
-                        className="w-full h-36 object-cover"
+                        src={liveSnapshotUrl || ASSETS.lobbyCamera}
+                        alt="Cámara en vivo Akuvox E12W"
+                        className="w-full h-32 object-cover"
                         fallbackIcon="videocam"
-                        fallbackLabel="Cámara ColorVu · Hall PB"
+                        fallbackLabel="Cámara 1080p · Akuvox E12W"
                       />
                       <div className="absolute inset-x-0 bottom-0 bg-inverse-surface/85 px-3 py-1.5 flex items-center justify-between text-inverse-on-surface">
                         <span className="font-label text-label-sm">
-                          Frente de calle · Portero IA
+                          Frente de calle · Akuvox E12W
                         </span>
                         <span className="font-mono text-mono-sm tabular-nums">{nowTime()} hs</span>
                       </div>
                     </div>
 
-                    <div className="p-3 grid grid-cols-2 gap-2">
+                    <div className="p-3 flex flex-col gap-2">
+                      {/* Primary Ultra-Fast Quick Open Button */}
                       <button
                         type="button"
-                        onClick={() => handleOpenDoor('app')}
-                        className="inline-flex items-center justify-center gap-1.5 px-3 py-2.5 min-h-[44px] rounded bg-primary text-on-primary hover:bg-primary-container transition-colors whitespace-nowrap cursor-pointer"
+                        onClick={handleQuickOpenDoor}
+                        className="w-full py-3.5 px-4 rounded-md bg-primary text-on-primary hover:bg-primary-container transition-colors flex items-center justify-center gap-2.5 shadow-sm cursor-pointer"
                       >
-                        <span className="material-symbols-outlined text-title-md" aria-hidden="true">
-                          door_front
+                        <span className="material-symbols-outlined text-2xl" aria-hidden="true">
+                          {door2Countdown > 0 || door1Countdown > 0 ? 'lock_open' : 'door_front'}
                         </span>
-                        <span className="font-label text-label-md">
-                          {door2Countdown > 0 ? `Abierta (${door2Countdown}s)` : 'Abrir puerta'}
+                        <span className="font-headline text-title-md">
+                          {door2Countdown > 0
+                            ? `Puerta Abierta (${door2Countdown}s)`
+                            : 'Abrir Puerta Ahora'}
                         </span>
                       </button>
 
-                      <button
-                        type="button"
-                        onClick={handleOpenGate}
-                        className="inline-flex items-center justify-center gap-1.5 px-3 py-2.5 min-h-[44px] rounded bg-surface-container-lowest text-secondary border border-outline-variant hover:bg-surface-container-low transition-colors whitespace-nowrap cursor-pointer"
-                      >
-                        <span className="material-symbols-outlined text-title-md" aria-hidden="true">
-                          garage
-                        </span>
-                        <span className="font-label text-label-md">
-                          {gateCountdown > 0 ? `Abierto (${gateCountdown}s)` : 'Abrir portón'}
-                        </span>
-                      </button>
+                      {/* Modular NFC HCE (Android 13.56MHz) + Universal BLE 5.0 (iOS/Android) */}
+                      <div className="grid grid-cols-2 gap-2">
+                        <button
+                          type="button"
+                          onClick={() => void handleToggleNfcHce()}
+                          className={`py-2.5 px-2.5 rounded border flex flex-col items-start gap-0.5 text-left transition-colors cursor-pointer ${
+                            nfcSession?.active
+                              ? 'bg-secondary text-on-secondary border-secondary'
+                              : 'bg-surface-container-low border-outline-variant text-on-surface hover:border-primary'
+                          }`}
+                        >
+                          <div className="flex items-center gap-1.5 w-full justify-between">
+                            <span className="font-label text-label-sm">NFC HCE</span>
+                            <span className="material-symbols-outlined text-title-md" aria-hidden="true">
+                              nfc
+                            </span>
+                          </div>
+                          <span
+                            className={`font-mono text-[10px] truncate w-full ${
+                              nfcSession?.active ? 'text-white/90' : 'text-on-surface-variant'
+                            }`}
+                          >
+                            {nfcSession?.active ? `UID ${nfcSession.emulatedUid}` : '13.56 MHz Android'}
+                          </span>
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() => void handleBleUnlock()}
+                          className={`py-2.5 px-2.5 rounded border flex flex-col items-start gap-0.5 text-left transition-colors cursor-pointer ${
+                            bleState.inRange
+                              ? 'bg-secondary-container/70 border-secondary/40 text-on-secondary-container hover:bg-secondary-container'
+                              : 'bg-surface-container border-outline-variant text-on-surface-variant'
+                          }`}
+                        >
+                          <div className="flex items-center gap-1.5 w-full justify-between">
+                            <span className="font-label text-label-sm">BLE 5.0</span>
+                            <span className="material-symbols-outlined text-title-md" aria-hidden="true">
+                              bluetooth_connected
+                            </span>
+                          </div>
+                          <span className="font-mono text-[10px] truncate w-full">
+                            {bleState.inRange
+                              ? `${bleState.estimatedMeters}m (${bleState.rssiDbm} dBm)`
+                              : 'Fuera de rango'}
+                          </span>
+                        </button>
+                      </div>
+
+                      <div className="flex items-center justify-between pt-1 border-t border-outline-variant">
+                        <button
+                          type="button"
+                          onClick={handleToggleBleRange}
+                          className="font-mono text-[11px] text-primary hover:underline cursor-pointer"
+                        >
+                          {bleState.inRange ? 'Simular alejarse (>2m)' : 'Simular acercarse (<2m)'}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={handleOpenGate}
+                          className="inline-flex items-center gap-1 font-label text-label-sm text-secondary hover:underline cursor-pointer"
+                        >
+                          <span className="material-symbols-outlined text-sm" aria-hidden="true">
+                            garage
+                          </span>
+                          <span>
+                            {gateCountdown > 0 ? `Garaje (${gateCountdown}s)` : 'Abrir Garaje'}
+                          </span>
+                        </button>
+                      </div>
                     </div>
                   </section>
 
-                  {/* Ultra-fast 2-Tap Actions */}
+                  {/* 2-Tap Quick Actions */}
                   <section className="grid grid-cols-2 gap-2.5">
                     <button
                       type="button"
                       onClick={() => setInlineQrOpen((prev) => !prev)}
-                      className="bg-surface-container-lowest border border-outline-variant rounded-md px-3 py-3 min-h-[52px] flex items-center gap-2 text-left hover:bg-surface-container-low transition-colors cursor-pointer"
+                      className="bg-surface-container-lowest border border-outline-variant rounded-md px-3 py-3 min-h-[52px] flex items-center gap-2 text-left hover:bg-surface-container-low cursor-pointer"
                     >
                       <span className="w-8 h-8 rounded bg-surface-variant text-primary inline-flex items-center justify-center shrink-0">
                         <span className="material-symbols-outlined text-title-md" aria-hidden="true">
@@ -563,7 +714,7 @@ export function AppResidenteView({
                           Pase 2 toques
                         </span>
                         <span className="font-body text-label-sm text-on-surface-variant">
-                          QR + PIN WhatsApp
+                          Voz + Magic Link
                         </span>
                       </div>
                     </button>
@@ -571,7 +722,7 @@ export function AppResidenteView({
                     <button
                       type="button"
                       onClick={() => onChangeTab('paquetes')}
-                      className="bg-surface-container-lowest border border-outline-variant rounded-md px-3 py-3 min-h-[52px] flex items-center gap-2 text-left hover:bg-surface-container-low transition-colors cursor-pointer"
+                      className="bg-surface-container-lowest border border-outline-variant rounded-md px-3 py-3 min-h-[52px] flex items-center gap-2 text-left hover:bg-surface-container-low cursor-pointer"
                     >
                       <span className="w-8 h-8 rounded bg-secondary-container text-on-secondary-container inline-flex items-center justify-center shrink-0">
                         <span className="material-symbols-outlined text-title-md" aria-hidden="true">
@@ -594,31 +745,31 @@ export function AppResidenteView({
                     <section className="bg-surface-container-low border border-primary/40 rounded-md p-3.5 flex flex-col gap-2.5">
                       <div className="flex items-center justify-between">
                         <span className="font-title text-label-lg text-on-surface">
-                          Toque 2: Elegí y compartí al instante
+                          Toque 2: Generar código voz + WhatsApp
                         </span>
-                        <span className="font-mono text-mono-sm text-primary">1 solo uso</span>
+                        <span className="font-mono text-mono-sm text-primary">1 uso</span>
                       </div>
                       <div className="grid grid-cols-3 gap-2">
                         <button
                           type="button"
-                          onClick={() => handleQuickPass('pedidosya')}
-                          className="py-2.5 px-2 rounded bg-surface-container-lowest border border-outline-variant font-label text-label-sm text-on-surface hover:border-primary cursor-pointer"
+                          onClick={() => handleQuickPass('visita')}
+                          className="py-2.5 px-2 rounded bg-surface-container-lowest border border-outline-variant font-label text-label-sm hover:border-primary cursor-pointer"
                         >
-                          PedidosYa
+                          Visita (4h)
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleQuickPass('pedidosya')}
+                          className="py-2.5 px-2 rounded bg-surface-container-lowest border border-outline-variant font-label text-label-sm hover:border-primary cursor-pointer"
+                        >
+                          Delivery (1h)
                         </button>
                         <button
                           type="button"
                           onClick={() => handleQuickPass('mercadolibre')}
-                          className="py-2.5 px-2 rounded bg-surface-container-lowest border border-outline-variant font-label text-label-sm text-on-surface hover:border-primary cursor-pointer"
+                          className="py-2.5 px-2 rounded bg-surface-container-lowest border border-outline-variant font-label text-label-sm hover:border-primary cursor-pointer"
                         >
-                          Mercado Libre
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => handleQuickPass('visita')}
-                          className="py-2.5 px-2 rounded bg-surface-container-lowest border border-outline-variant font-label text-label-sm text-on-surface hover:border-primary cursor-pointer"
-                        >
-                          Visita
+                          Paquete (2h)
                         </button>
                       </div>
                     </section>
@@ -638,7 +789,7 @@ export function AppResidenteView({
                         <div className="flex-1 min-w-0">
                           <div className="flex items-center justify-between gap-2">
                             <h2 className="font-title text-label-lg text-on-surface truncate">
-                              Tu paquete ya está en {primaryParcel.storageMode === 'locker' ? 'Locker' : 'el zaguán'}
+                              Paquete en {primaryParcel.storageMode === 'locker' ? 'Locker' : 'Zaguán'}
                             </h2>
                             <span
                               className={`inline-flex items-center px-2 py-0.5 rounded-sm font-label text-label-sm shrink-0 ${
@@ -663,7 +814,7 @@ export function AppResidenteView({
                           <button
                             type="button"
                             onClick={() => handleConfirmParcelClick(primaryParcel)}
-                            className="px-2.5 py-1 rounded bg-surface-container-low border border-outline-variant font-label text-label-sm text-primary hover:bg-surface-container cursor-pointer"
+                            className="px-2.5 py-1 rounded bg-surface-container-low border border-outline-variant font-label text-label-sm text-primary cursor-pointer"
                           >
                             Confirmar retiro
                           </button>
@@ -680,7 +831,7 @@ export function AppResidenteView({
                     </article>
                   )}
 
-                  {/* Activity & Official Notices Tabs */}
+                  {/* Activity & Official Notices */}
                   <div className="w-full">
                     <div
                       role="tablist"
@@ -691,7 +842,7 @@ export function AppResidenteView({
                         role="tab"
                         aria-selected={inicioSubTab === 'actividad'}
                         onClick={() => setInicioSubTab('actividad')}
-                        className={`py-1.5 rounded-sm transition-colors cursor-pointer ${
+                        className={`py-1.5 rounded-sm cursor-pointer ${
                           inicioSubTab === 'actividad'
                             ? 'bg-surface-container-lowest text-on-surface shadow-sm'
                             : 'text-on-surface-variant'
@@ -703,7 +854,7 @@ export function AppResidenteView({
                         role="tab"
                         aria-selected={inicioSubTab === 'reglamento'}
                         onClick={() => setInicioSubTab('reglamento')}
-                        className={`py-1.5 rounded-sm transition-colors cursor-pointer ${
+                        className={`py-1.5 rounded-sm cursor-pointer ${
                           inicioSubTab === 'reglamento'
                             ? 'bg-surface-container-lowest text-on-surface shadow-sm'
                             : 'text-on-surface-variant'
@@ -756,10 +907,9 @@ export function AppResidenteView({
                 </>
               )}
 
-              {/* TAB 2: ACCESOS (Un solo uso + Recurrentes + Coacción) */}
+              {/* TAB 2: ACCESOS (Un solo uso + Recurrentes RFID/Móvil + Coacción) */}
               {activeTab === 'accesos' && (
                 <>
-                  {/* Sub-tabs inside Accesos */}
                   <div
                     role="tablist"
                     aria-label="Tipos de acceso"
@@ -767,8 +917,8 @@ export function AppResidenteView({
                   >
                     {(
                       [
-                        { id: 'un-uso', label: '1 Uso' },
-                        { id: 'recurrentes', label: 'Personal' },
+                        { id: 'un-uso', label: '1 Uso (Voz/Link)' },
+                        { id: 'recurrentes', label: 'Recurrentes' },
                         { id: 'coaccion', label: 'Coacción' },
                       ] as { id: AccessSubTab; label: string }[]
                     ).map((st) => (
@@ -777,7 +927,7 @@ export function AppResidenteView({
                         role="tab"
                         aria-selected={accessSubTab === st.id}
                         onClick={() => setAccessSubTab(st.id)}
-                        className={`py-1.5 rounded-sm font-label text-label-sm cursor-pointer transition-colors ${
+                        className={`py-1.5 rounded-sm font-label text-label-sm cursor-pointer ${
                           accessSubTab === st.id
                             ? 'bg-surface-container-lowest text-primary shadow-sm'
                             : 'text-on-surface-variant'
@@ -788,13 +938,16 @@ export function AppResidenteView({
                     ))}
                   </div>
 
-                  {/* SUB-TAB 2A: PASES DE UN SOLO USO (QR + PIN + Link WhatsApp) */}
+                  {/* SUB-TAB 2A: PASE DE UN SOLO USO (Código Voz 4 dígitos + Magic Link + WhatsApp) */}
                   {accessSubTab === 'un-uso' && (
                     <>
-                      <section className="bg-surface-container-lowest border border-outline-variant rounded-md p-3.5 flex flex-col gap-3">
+                      <form
+                        onSubmit={handleCreateSingleUsePass}
+                        className="bg-surface-container-lowest border border-outline-variant rounded-md p-3.5 flex flex-col gap-3"
+                      >
                         <div className="flex items-center justify-between">
                           <h2 className="font-title text-title-md text-on-surface">
-                            Pase 1 solo uso (QR + PIN)
+                            Pase 1 uso · Código Voz + Magic Link
                           </h2>
                           <span className="font-mono text-mono-sm text-secondary bg-secondary-container px-2 py-0.5 rounded-sm">
                             Autodestruible
@@ -802,93 +955,91 @@ export function AppResidenteView({
                         </div>
 
                         <div className="grid grid-cols-3 gap-1.5">
-                          {(['visita', 'pedidosya', 'mercadolibre'] as PassTypeKey[]).map((key) => {
-                            const active = passType === key;
-                            return (
-                              <button
-                                key={key}
-                                type="button"
-                                onClick={() => handleSelectPassType(key)}
-                                className={`py-2 px-1.5 rounded font-label text-label-sm transition-colors cursor-pointer whitespace-nowrap ${
-                                  active
-                                    ? 'bg-primary text-on-primary'
-                                    : 'bg-surface-container-low border border-outline-variant text-on-surface'
-                                }`}
-                              >
-                                {PASS_TYPE_PRESETS[key].label}
-                              </button>
-                            );
-                          })}
+                          {(['visita', 'pedidosya', 'mercadolibre'] as PassTypeKey[]).map((key) => (
+                            <button
+                              key={key}
+                              type="button"
+                              onClick={() => handleSelectPassType(key)}
+                              className={`py-2 px-1.5 rounded font-label text-label-sm cursor-pointer whitespace-nowrap ${
+                                passType === key
+                                  ? 'bg-primary text-on-primary'
+                                  : 'bg-surface-container-low border border-outline-variant text-on-surface'
+                              }`}
+                            >
+                              {PASS_TYPE_PRESETS[key].label}
+                            </button>
+                          ))}
                         </div>
 
                         <div className="grid grid-cols-2 gap-2">
                           <div className="flex flex-col gap-1">
                             <label htmlFor="guest-name" className="font-label text-label-sm text-on-surface-variant">
-                              Visita / Delivery
+                              Nombre de la visita
                             </label>
                             <input
                               id="guest-name"
                               type="text"
                               value={guestName}
                               onChange={(e) => setGuestName(e.target.value)}
+                              placeholder="Ej. Lucas"
+                              required
                               className="rounded border border-outline-variant bg-surface text-on-surface font-body text-body-sm py-1.5 px-2"
                             />
                           </div>
                           <div className="flex flex-col gap-1">
-                            <label htmlFor="guest-duration" className="font-label text-label-sm text-on-surface-variant">
-                              Ventana de validez
+                            <label htmlFor="guest-hours" className="font-label text-label-sm text-on-surface-variant">
+                              Vigencia (horas)
                             </label>
                             <select
-                              id="guest-duration"
-                              value={guestDuration}
-                              onChange={(e) => setGuestDuration(e.target.value)}
+                              id="guest-hours"
+                              value={hoursValid}
+                              onChange={(e) => setHoursValid(Number(e.target.value))}
                               className="rounded border border-outline-variant bg-surface text-on-surface font-body text-body-sm py-1.5 px-2"
                             >
-                              <option value="Hoy 20:00–21:30">Hoy 20:00 a 21:30</option>
-                              <option value="1 uso · 30 min">30 min (1 uso)</option>
-                              <option value="1 uso · 2 hs">2 horas (1 uso)</option>
+                              <option value={1}>1 hora</option>
+                              <option value={2}>2 horas</option>
+                              <option value={4}>4 horas</option>
+                              <option value={8}>8 horas</option>
+                              <option value={24}>24 horas</option>
                             </select>
                           </div>
                         </div>
 
-                        {/* QR + Numeric PIN Preview */}
+                        {/* Voice Code + QR + Magic Link Preview */}
                         <div className="p-3 rounded bg-surface-container-low border border-outline-variant flex items-center gap-3">
                           <div className="w-16 h-16 rounded bg-surface-container-lowest border border-outline-variant p-1.5 shrink-0">
                             <QrPreviewSvg seed={previewCode} />
                           </div>
                           <div className="flex flex-col gap-0.5 min-w-0">
-                            <div className="flex items-center gap-2">
-                              <span className="font-mono text-mono-md text-primary font-semibold">
-                                PIN {previewPin}
-                              </span>
-                              <span className="font-mono text-mono-sm text-on-surface-variant">
-                                {previewCode}
-                              </span>
-                            </div>
-                            <span className="font-body text-body-sm text-on-surface-variant">
-                              {previewSummary}
+                            <span className="font-label text-[11px] text-on-surface-variant">
+                              Código de voz (dictar al portero IA):
                             </span>
-                            <span className="font-label text-label-sm text-success">
-                              Se destruye tras 1er uso o al vencer
+                            <span className="font-mono text-title-lg text-primary font-bold tracking-widest">
+                              {previewPin}
+                            </span>
+                            <span className="font-mono text-[10px] text-secondary truncate">
+                              {buildMagicLinkUrl(previewCode)}
+                            </span>
+                            <span className="font-body text-[11px] text-on-surface-variant">
+                              {previewSummary}
                             </span>
                           </div>
                         </div>
 
                         <button
-                          type="button"
-                          onClick={handleSendWhatsAppQr}
-                          className="w-full inline-flex items-center justify-center gap-2 px-4 py-2.5 min-h-[44px] rounded bg-primary text-on-primary hover:bg-primary-container transition-colors cursor-pointer"
+                          type="submit"
+                          className="w-full inline-flex items-center justify-center gap-2 px-4 py-2.5 min-h-[44px] rounded bg-primary text-on-primary hover:bg-primary-container cursor-pointer"
                         >
                           <span className="material-symbols-outlined text-title-md" aria-hidden="true">
                             share
                           </span>
                           <span className="font-label text-label-md">
-                            Generar link WhatsApp (QR + PIN)
+                            Crear pase y compartir por WhatsApp
                           </span>
                         </button>
-                      </section>
+                      </form>
 
-                      {/* Active & Destroyed Single-use Passes */}
+                      {/* Active & Used Single-use Passes */}
                       <section className="flex flex-col gap-2">
                         <div className="flex items-center justify-between">
                           <h3 className="font-title text-label-lg text-on-surface">
@@ -922,29 +1073,27 @@ export function AppResidenteView({
                                   {pass.detailText}
                                 </span>
                               </div>
-                              <div className="flex items-center gap-1 shrink-0">
-                                {pass.status === 'Activo' && (
-                                  <>
-                                    <button
-                                      type="button"
-                                      onClick={() => setSharedPassPreview(pass)}
-                                      className="px-2 py-1 rounded bg-surface-container-low border border-outline-variant font-label text-label-sm text-primary cursor-pointer"
-                                    >
-                                      Link
-                                    </button>
-                                    <button
-                                      type="button"
-                                      onClick={() => {
-                                        onRevokePass(pass.id);
-                                        showFeedback(`Pase PIN ${pass.pin} revocado`);
-                                      }}
-                                      className="px-2 py-1 rounded border border-outline-variant font-label text-label-sm text-error hover:bg-error-container cursor-pointer"
-                                    >
-                                      Borrar
-                                    </button>
-                                  </>
-                                )}
-                              </div>
+                              {pass.status === 'Activo' && (
+                                <div className="flex items-center gap-1 shrink-0">
+                                  <button
+                                    type="button"
+                                    onClick={() => setSharedPassPreview(pass)}
+                                    className="px-2 py-1 rounded bg-secondary-container text-on-secondary-container font-label text-label-sm cursor-pointer"
+                                  >
+                                    WhatsApp
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      onRevokePass(pass.id);
+                                      showFeedback(`Pase voz ${pass.pin} revocado`);
+                                    }}
+                                    className="px-2 py-1 rounded border border-outline-variant font-label text-label-sm text-error hover:bg-error-container cursor-pointer"
+                                  >
+                                    Revocar
+                                  </button>
+                                </div>
+                              )}
                             </div>
                           ))}
                         </div>
@@ -952,19 +1101,22 @@ export function AppResidenteView({
                     </>
                   )}
 
-                  {/* SUB-TAB 2B: PASES RECURRENTES (Limpieza, Paseadores, Horarios + Auditoría) */}
+                  {/* SUB-TAB 2B: PERMISOS RECURRENTES (Horarios estrictos + RFID UID físico + Acceso móvil + Push) */}
                   {accessSubTab === 'recurrentes' && (
                     <div className="flex flex-col gap-3">
                       <div className="flex items-center justify-between">
                         <h2 className="font-title text-title-md text-on-surface">
-                          Personal y recurrentes
+                          Personal y servicios recurrentes
                         </h2>
                         <button
                           type="button"
-                          onClick={() => setShowAddStaff((s) => !s)}
+                          onClick={() => {
+                            setStaffFormError(null);
+                            setShowAddStaff((s) => !s);
+                          }}
                           className="px-2.5 py-1.5 rounded bg-primary text-on-primary font-label text-label-sm cursor-pointer"
                         >
-                          {showAddStaff ? 'Cancelar' : '+ Nuevo perfil'}
+                          {showAddStaff ? 'Cancelar' : '+ Nuevo permiso'}
                         </button>
                       </div>
 
@@ -978,14 +1130,14 @@ export function AppResidenteView({
                               type="text"
                               value={staffName}
                               onChange={(e) => setStaffName(e.target.value)}
-                              placeholder="Nombre (ej. Sofía)"
+                              placeholder="Nombre (ej. Marta)"
                               className="rounded border border-outline-variant bg-surface px-2.5 py-1.5 font-body text-body-sm"
                               required
                             />
                             <select
                               value={staffRole}
                               onChange={(e) => setStaffRole(e.target.value as RecurringPass['role'])}
-                              className="rounded border border-outline-variant bg-surface px-2 py-1.5 font-body text-body-sm"
+                              className="rounded border border-outline-variant bg-surface px-2.5 py-1.5 font-body text-body-sm"
                             >
                               <option value="Limpieza">Limpieza</option>
                               <option value="Paseador">Paseador</option>
@@ -996,7 +1148,7 @@ export function AppResidenteView({
 
                           <div className="flex flex-col gap-1">
                             <span className="font-label text-label-sm text-on-surface-variant">
-                              Días habilitados (bloqueo automático fuera de franja):
+                              Días permitidos (bloqueo estricto fuera de franja):
                             </span>
                             <div className="grid grid-cols-7 gap-1">
                               {ALL_DAYS.map((day) => {
@@ -1020,25 +1172,62 @@ export function AppResidenteView({
                           </div>
 
                           <div className="grid grid-cols-2 gap-2">
+                            <div className="flex flex-col gap-0.5">
+                              <span className="font-label text-[11px] text-on-surface-variant">Desde</span>
+                              <input
+                                type="time"
+                                value={staffStart}
+                                onChange={(e) => setStaffStart(e.target.value)}
+                                className="rounded border border-outline-variant bg-surface px-2 py-1.5 font-mono text-mono-sm"
+                              />
+                            </div>
+                            <div className="flex flex-col gap-0.5">
+                              <span className="font-label text-[11px] text-on-surface-variant">Hasta</span>
+                              <input
+                                type="time"
+                                value={staffEnd}
+                                onChange={(e) => setStaffEnd(e.target.value)}
+                                className="rounded border border-outline-variant bg-surface px-2 py-1.5 font-mono text-mono-sm"
+                              />
+                            </div>
+                          </div>
+
+                          {/* Physical RFID Keyfob UID input + Mobile Access toggle */}
+                          <div className="flex flex-col gap-1">
+                            <label htmlFor="rfid-uid" className="font-label text-label-sm text-on-surface-variant">
+                              UID de llavero RFID físico 13.56 MHz (opcional)
+                            </label>
                             <input
-                              type="time"
-                              value={staffStart}
-                              onChange={(e) => setStaffStart(e.target.value)}
-                              className="rounded border border-outline-variant bg-surface px-2 py-1.5 font-mono text-mono-sm"
-                            />
-                            <input
-                              type="time"
-                              value={staffEnd}
-                              onChange={(e) => setStaffEnd(e.target.value)}
-                              className="rounded border border-outline-variant bg-surface px-2 py-1.5 font-mono text-mono-sm"
+                              id="rfid-uid"
+                              type="text"
+                              value={staffRfidUid}
+                              onChange={(e) => setStaffRfidUid(e.target.value)}
+                              placeholder="Ej. 04:A3:2F:8B o RF-402M"
+                              className="rounded border border-outline-variant bg-surface px-2.5 py-1.5 font-mono text-mono-sm"
                             />
                           </div>
+
+                          <label className="inline-flex items-center gap-2 font-label text-label-sm text-on-surface cursor-pointer">
+                            <input
+                              type="checkbox"
+                              checked={staffMobileAccess}
+                              onChange={(e) => setStaffMobileAccess(e.target.checked)}
+                              className="accent-primary"
+                            />
+                            Habilitar acceso móvil (NFC HCE / BLE / Código voz)
+                          </label>
+
+                          {staffFormError && (
+                            <p className="p-2 rounded bg-error-container text-on-error-container font-label text-label-sm">
+                              {staffFormError}
+                            </p>
+                          )}
 
                           <button
                             type="submit"
                             className="w-full py-2 rounded bg-secondary text-on-secondary font-label text-label-md cursor-pointer"
                           >
-                            Guardar perfil y generar PIN/RFID
+                            Guardar permiso recurrente
                           </button>
                         </form>
                       )}
@@ -1046,10 +1235,8 @@ export function AppResidenteView({
                       {recurringPasses.map((staff) => (
                         <article
                           key={staff.id}
-                          className={`bg-surface-container-lowest border rounded-md p-3.5 flex flex-col gap-2.5 ${
-                            staff.status === 'Revocado'
-                              ? 'border-outline-variant opacity-60'
-                              : 'border-outline-variant'
+                          className={`bg-surface-container-lowest border border-outline-variant rounded-md p-3.5 flex flex-col gap-2.5 ${
+                            staff.status === 'Revocado' ? 'opacity-60' : ''
                           }`}
                         >
                           <div className="flex items-start justify-between gap-2">
@@ -1063,11 +1250,20 @@ export function AppResidenteView({
                                 </span>
                               </div>
                               <p className="font-mono text-mono-sm text-secondary mt-0.5">
-                                Días: {staff.days.join(' · ')} | {staff.startTime}–{staff.endTime} hs
+                                {staff.days.join(' · ')} | {staff.startTime}–{staff.endTime} hs
                               </p>
-                              <p className="font-mono text-mono-sm text-on-surface-variant">
-                                PIN {staff.pin} · Tag {staff.rfidTag}
-                              </p>
+                              <div className="flex flex-wrap gap-1.5 mt-1">
+                                {staff.rfidTag && (
+                                  <span className="font-mono text-[11px] px-1.5 py-0.5 rounded bg-surface-container text-on-surface">
+                                    RFID: {staff.rfidTag}
+                                  </span>
+                                )}
+                                {staff.mobileAccessEnabled && (
+                                  <span className="font-mono text-[11px] px-1.5 py-0.5 rounded bg-secondary-container text-on-secondary-container">
+                                    Móvil + Voz {staff.pin}
+                                  </span>
+                                )}
+                              </div>
                             </div>
                             <span
                               className={`px-2 py-0.5 rounded-sm font-label text-label-sm shrink-0 ${
@@ -1079,17 +1275,16 @@ export function AppResidenteView({
                               }`}
                             >
                               {staff.status === 'Revocado'
-                                ? 'Eliminado'
+                                ? 'Revocado'
                                 : staff.currentlyInside
                                   ? 'En depto'
-                                  : 'Habilitado'}
+                                  : 'Activo'}
                             </span>
                           </div>
 
-                          {/* Audit Log */}
                           <div className="p-2 rounded bg-surface-container-low border border-outline-variant flex flex-col gap-1">
                             <span className="font-label text-label-sm text-on-surface-variant">
-                              Auditoría silenciosa de jornadas:
+                              Auditoría con notificación push (ingreso / egreso):
                             </span>
                             {staff.auditLog.slice(0, 2).map((entry) => (
                               <div
@@ -1108,27 +1303,20 @@ export function AppResidenteView({
                             <div className="grid grid-cols-2 gap-2 pt-1">
                               <button
                                 type="button"
-                                onClick={() => {
-                                  onToggleStaffShift(staff.id);
-                                  showFeedback(
-                                    staff.currentlyInside
-                                      ? `Salida silenciosa registrada: ${staff.name}`
-                                      : `Ingreso silencioso registrado: ${staff.name}`
-                                  );
-                                }}
+                                onClick={() => handleStaffShiftClick(staff)}
                                 className="py-1.5 px-2 rounded bg-surface-container-low border border-outline-variant font-label text-label-sm text-primary cursor-pointer"
                               >
-                                {staff.currentlyInside ? 'Registrar salida' : 'Simular ingreso'}
+                                {staff.currentlyInside ? 'Simular egreso (Push)' : 'Simular ingreso (Push)'}
                               </button>
                               <button
                                 type="button"
                                 onClick={() => {
                                   onRevokeRecurringPass(staff.id);
-                                  showFeedback(`Perfil de ${staff.name} eliminado al instante`);
+                                  showFeedback(`Permiso de ${staff.name} revocado al instante`);
                                 }}
                                 className="py-1.5 px-2 rounded bg-error-container text-on-error-container font-label text-label-sm cursor-pointer"
                               >
-                                Revocar en 1 seg
+                                Revocar al instante
                               </button>
                             </div>
                           )}
@@ -1137,7 +1325,7 @@ export function AppResidenteView({
                     </div>
                   )}
 
-                  {/* SUB-TAB 2C: BOTÓN DE PÁNICO / COACCIÓN */}
+                  {/* SUB-TAB 2C: PIN DE PÁNICO / COACCIÓN */}
                   {accessSubTab === 'coaccion' && (
                     <section className="bg-surface-container-lowest border border-outline-variant rounded-md p-4 flex flex-col gap-3">
                       <div className="flex items-center gap-2 text-error">
@@ -1149,12 +1337,10 @@ export function AppResidenteView({
                         </h2>
                       </div>
                       <p className="font-body text-body-sm text-on-surface-variant">
-                        Si un delincuente te obliga a abrir la puerta, invertí los últimos dos
-                        dígitos de tu PIN. <strong>La puerta abre normalmente</strong> sin sonar
-                        alarmas, pero dispara alerta silenciosa con audio/video a tus contactos y
-                        seguridad.
+                        Invertí los últimos dos dígitos de tu PIN en el teclado Wiegand o dictado de
+                        emergencia: abre normalmente sin alertar y dispara alerta silenciosa con
+                        audio/video.
                       </p>
-
                       <div className="grid grid-cols-2 gap-2.5">
                         <div className="p-3 rounded bg-surface-container-low border border-outline-variant">
                           <span className="font-label text-label-sm text-on-surface-variant block">
@@ -1166,14 +1352,13 @@ export function AppResidenteView({
                         </div>
                         <div className="p-3 rounded bg-error-container/60 border border-error/40">
                           <span className="font-label text-label-sm text-on-error-container block">
-                            PIN Coacción (invertido)
+                            PIN Coacción
                           </span>
                           <span className="font-mono text-headline-sm text-on-error-container tabular-nums">
                             {duressPin}
                           </span>
                         </div>
                       </div>
-
                       <div className="flex gap-2">
                         <input
                           type="text"
@@ -1188,7 +1373,7 @@ export function AppResidenteView({
                           onClick={() => {
                             if (pinDraft.length === 4) {
                               onUpdateResidentPin(pinDraft);
-                              showFeedback(`PIN actualizado a ${pinDraft} (Coacción recalculado)`);
+                              showFeedback(`PIN actualizado a ${pinDraft}`);
                             }
                           }}
                           className="px-3 py-2 rounded bg-primary text-on-primary font-label text-label-sm cursor-pointer"
@@ -1196,25 +1381,6 @@ export function AppResidenteView({
                           Cambiar PIN
                         </button>
                       </div>
-
-                      <div className="p-3 rounded bg-surface-container-low border border-outline-variant flex flex-col gap-1">
-                        <span className="font-label text-label-sm text-on-surface">
-                          Contactos alertados con audio/video en vivo:
-                        </span>
-                        {BUILDING_INFO.emergencyContacts.map((contact) => (
-                          <span key={contact} className="font-body text-body-sm text-on-surface-variant">
-                            • {contact}
-                          </span>
-                        ))}
-                      </div>
-
-                      <button
-                        type="button"
-                        onClick={() => onNavigateMain('portero-ia')}
-                        className="w-full py-2.5 px-3 rounded bg-error text-on-error font-label text-label-md cursor-pointer"
-                      >
-                        Probar PIN {duressPin} en Pantalla Portero IA →
-                      </button>
                     </section>
                   )}
                 </>
@@ -1223,23 +1389,18 @@ export function AppResidenteView({
               {/* TAB 3: PAQUETERÍA INTELIGENTE */}
               {activeTab === 'paquetes' && (
                 <>
-                  {/* Pre-authorize Expected Parcel Form */}
                   <form
                     onSubmit={handlePreAuthSubmit}
                     className="bg-surface-container-lowest border border-outline-variant rounded-md p-3.5 flex flex-col gap-2.5"
                   >
                     <div className="flex items-center justify-between">
                       <h2 className="font-title text-label-lg text-on-surface">
-                        Pre-autorizar envío (Sin molestias)
+                        Pre-autorizar envío (OCR sin molestias)
                       </h2>
                       <span className="font-mono text-mono-sm text-primary bg-surface-variant px-2 py-0.5 rounded-sm">
                         OCR IA
                       </span>
                     </div>
-                    <p className="font-body text-body-sm text-on-surface-variant">
-                      Avisá qué esperás hoy. La IA leerá la etiqueta en cámara y abrirá solo la
-                      primera puerta sin interrumpirte.
-                    </p>
                     <div className="grid grid-cols-2 gap-2">
                       <select
                         value={preAuthCarrier}
@@ -1269,141 +1430,81 @@ export function AppResidenteView({
                     />
                     <button
                       type="submit"
-                      className="w-full py-2 rounded bg-primary text-on-primary font-label text-label-md hover:bg-primary-container cursor-pointer"
+                      className="w-full py-2 rounded bg-primary text-on-primary font-label text-label-md cursor-pointer"
                     >
                       Cargar &ldquo;Espero paquete hoy&rdquo;
                     </button>
-
-                    {activeUnitPreAuth.length > 0 && (
-                      <div className="pt-2 border-t border-outline-variant flex flex-col gap-1">
-                        <span className="font-label text-label-sm text-secondary">
-                          Esperados hoy (Apto {BUILDING_INFO.activeUnit}):
-                        </span>
-                        {activeUnitPreAuth.map((pa) => (
-                          <div
-                            key={pa.id}
-                            className="flex items-center justify-between font-body text-body-sm text-on-surface"
-                          >
-                            <span className="truncate">
-                              • {pa.carrier} ({pa.description})
-                            </span>
-                            <span className="font-mono text-mono-sm text-primary shrink-0">
-                              {pa.storageMode === 'locker' ? 'Locker' : 'Zaguán'}
-                            </span>
-                          </div>
-                        ))}
-                      </div>
-                    )}
                   </form>
 
-                  {/* Spontaneous Parcel 20s Rule Setting */}
                   <section className="bg-surface-container-lowest border border-outline-variant rounded-md p-3.5 flex flex-col gap-2">
-                    <div className="flex items-center justify-between">
-                      <span className="font-title text-label-lg text-on-surface">
-                        Regla sin aviso (tras 20 seg)
+                    <span className="font-title text-label-lg text-on-surface">
+                      Regla sin aviso (tras 20 seg)
+                    </span>
+                    <label className="flex items-start gap-2 p-2 rounded bg-surface-container-low border border-outline-variant cursor-pointer">
+                      <input
+                        type="radio"
+                        name="unannounced-rule"
+                        checked={unannouncedRule === 'auto-zaguan'}
+                        onChange={() => onChangeUnannouncedRule('auto-zaguan')}
+                        className="mt-1 accent-primary"
+                      />
+                      <span className="font-body text-body-sm text-on-surface">
+                        Autorizar ingreso automático al zaguán/locker con foto comprobante.
                       </span>
-                      <span className="font-mono text-mono-sm text-secondary">Doble exclusa</span>
-                    </div>
-                    <div className="grid grid-cols-1 gap-1.5">
-                      <label className="flex items-start gap-2 p-2 rounded bg-surface-container-low border border-outline-variant cursor-pointer">
-                        <input
-                          type="radio"
-                          name="unannounced-rule"
-                          checked={unannouncedRule === 'auto-zaguan'}
-                          onChange={() => onChangeUnannouncedRule('auto-zaguan')}
-                          className="mt-1 accent-primary"
-                        />
-                        <span className="font-body text-body-sm text-on-surface">
-                          Si no contesto en 20s, <strong>dejar pasar al zaguán/locker</strong>{' '}
-                          automáticamente con foto comprobante.
-                        </span>
-                      </label>
-                      <label className="flex items-start gap-2 p-2 rounded bg-surface-container-low border border-outline-variant cursor-pointer">
-                        <input
-                          type="radio"
-                          name="unannounced-rule"
-                          checked={unannouncedRule === 'reject'}
-                          onChange={() => onChangeUnannouncedRule('reject')}
-                          className="mt-1 accent-primary"
-                        />
-                        <span className="font-body text-body-sm text-on-surface">
-                          Si no contesto en 20s, no autorizar depósito.
-                        </span>
-                      </label>
-                    </div>
+                    </label>
+                    <label className="flex items-start gap-2 p-2 rounded bg-surface-container-low border border-outline-variant cursor-pointer">
+                      <input
+                        type="radio"
+                        name="unannounced-rule"
+                        checked={unannouncedRule === 'reject'}
+                        onChange={() => onChangeUnannouncedRule('reject')}
+                        className="mt-1 accent-primary"
+                      />
+                      <span className="font-body text-body-sm text-on-surface">
+                        No autorizar sin mi confirmación.
+                      </span>
+                    </label>
                   </section>
 
-                  {/* Primary Received Parcel with Visual Photo Proof */}
                   {primaryParcel && (
                     <article className="bg-surface-container-lowest border border-outline-variant rounded-md overflow-hidden flex flex-col">
-                      <div className="relative">
-                        <SmartImage
-                          src={primaryParcel.imageUrl || ASSETS.parcelReception}
-                          alt="Foto comprobante de paquete depositado"
-                          className="w-full h-36 object-cover"
-                          fallbackIcon="inventory_2"
-                          fallbackLabel="Foto comprobante Zaguán"
-                        />
-                        <div className="absolute top-2.5 right-2.5">
-                          <span
-                            className={`inline-flex items-center px-2 py-0.5 rounded-sm font-label text-label-sm ${
-                              primaryParcel.status === 'Para retirar'
-                                ? 'bg-warning-container text-on-warning-container'
-                                : 'bg-success-container text-on-success-container'
-                            }`}
-                          >
+                      <SmartImage
+                        src={primaryParcel.imageUrl || ASSETS.parcelReception}
+                        alt="Foto comprobante de paquete"
+                        className="w-full h-36 object-cover"
+                        fallbackIcon="inventory_2"
+                        fallbackLabel="Foto comprobante Zaguán"
+                      />
+                      <div className="p-3.5 flex flex-col gap-2">
+                        <div className="flex items-center justify-between">
+                          <h3 className="font-title text-title-md text-on-surface">
+                            {primaryParcel.carrier} ({primaryParcel.code})
+                          </h3>
+                          <span className="font-label text-label-sm px-2 py-0.5 rounded-sm bg-warning-container text-on-warning-container">
                             {primaryParcel.status}
                           </span>
                         </div>
-                      </div>
-
-                      <div className="p-3.5 flex flex-col gap-2.5">
-                        <div className="flex items-start justify-between gap-2">
-                          <div>
-                            <h3 className="font-title text-title-md text-on-surface">
-                              {primaryParcel.carrier}
-                            </h3>
-                            <p className="font-body text-body-sm text-on-surface-variant">
-                              {primaryParcel.receivedAt} · {primaryParcel.location}
-                            </p>
-                          </div>
-                          <span className="font-mono text-mono-sm text-primary bg-surface-variant px-2 py-0.5 rounded-sm shrink-0">
-                            {primaryParcel.code}
-                          </span>
-                        </div>
-
                         <p className="font-body text-body-sm text-on-surface-variant">
                           {primaryParcel.note}
                         </p>
-
                         {primaryParcel.authorizedPin && (
-                          <div className="p-2 rounded bg-surface-container-low border border-outline-variant flex items-center justify-between">
-                            <span className="font-label text-label-sm text-on-surface-variant">
-                              PIN retiro tercero
-                            </span>
-                            <span className="font-mono text-mono-md text-primary font-semibold">
-                              {primaryParcel.authorizedPin}
-                            </span>
-                          </div>
+                          <p className="font-mono text-mono-sm text-primary">
+                            PIN retiro tercero: {primaryParcel.authorizedPin}
+                          </p>
                         )}
-
                         <div className="grid grid-cols-2 gap-2 pt-1">
                           <button
                             type="button"
                             disabled={primaryParcel.status === 'Retirado'}
                             onClick={() => handleConfirmParcelClick(primaryParcel)}
-                            className={`py-2 px-2 rounded font-label text-label-sm ${
-                              primaryParcel.status === 'Retirado'
-                                ? 'bg-success-container text-on-success-container cursor-default'
-                                : 'bg-primary text-on-primary cursor-pointer'
-                            }`}
+                            className="py-2 rounded bg-primary text-on-primary font-label text-label-sm cursor-pointer disabled:opacity-60"
                           >
                             {primaryParcel.status === 'Retirado' ? 'Retirado ✓' : 'Confirmar retiro'}
                           </button>
                           <button
                             type="button"
                             onClick={() => handleAuthorizeThirdParty(primaryParcel)}
-                            className="py-2 px-2 rounded bg-surface-container-low border border-outline-variant font-label text-label-sm text-secondary cursor-pointer"
+                            className="py-2 rounded bg-surface-container-low border border-outline-variant font-label text-label-sm text-secondary cursor-pointer"
                           >
                             PIN tercero
                           </button>
@@ -1412,7 +1513,6 @@ export function AppResidenteView({
                     </article>
                   )}
 
-                  {/* Parcel History */}
                   <section className="bg-surface-container-lowest border border-outline-variant rounded-md divide-y divide-outline-variant">
                     {historyParcels.map((parcel) => (
                       <div key={parcel.id} className="p-3 flex items-center justify-between gap-2">
@@ -1424,7 +1524,7 @@ export function AppResidenteView({
                             {parcel.receivedAt} · {parcel.location}
                           </p>
                         </div>
-                        <span className="font-label text-label-sm px-2 py-0.5 rounded-sm bg-success-container text-on-success-container shrink-0">
+                        <span className="font-label text-label-sm px-2 py-0.5 rounded-sm bg-success-container text-on-success-container">
                           {parcel.status}
                         </span>
                       </div>
@@ -1433,26 +1533,17 @@ export function AppResidenteView({
                 </>
               )}
 
-              {/* TAB 4: CONSORCIO & COMUNICADOS OFICIALES */}
+              {/* TAB 4: EDIFICIO / COMUNICADOS */}
               {activeTab === 'consorcio' && (
                 <>
                   <section className="bg-surface-container-lowest border border-outline-variant rounded-md p-3.5 flex flex-col gap-2.5">
-                    <div className="flex items-center justify-between">
-                      <h2 className="font-title text-title-md text-on-surface">
-                        Comunicados Oficiales
-                      </h2>
-                      <span className="font-mono text-mono-sm text-primary">Cartelera sync</span>
-                    </div>
+                    <h2 className="font-title text-title-md text-on-surface">Comunicados Oficiales</h2>
                     <div className="divide-y divide-outline-variant">
                       {appNotices.map((n) => (
                         <div key={n.id} className="py-2.5 first:pt-0 last:pb-0 flex flex-col gap-1">
                           <div className="flex items-center justify-between gap-2">
-                            <span className="font-label text-label-md text-on-surface">
-                              {n.title}
-                            </span>
-                            <span className="font-mono text-mono-sm text-secondary shrink-0">
-                              {n.category}
-                            </span>
+                            <span className="font-label text-label-md text-on-surface">{n.title}</span>
+                            <span className="font-mono text-mono-sm text-secondary">{n.category}</span>
                           </div>
                           <p className="font-body text-body-sm text-on-surface-variant">{n.body}</p>
                         </div>
@@ -1461,72 +1552,49 @@ export function AppResidenteView({
                   </section>
 
                   <section className="bg-surface-container-lowest border border-outline-variant rounded-md p-3.5 flex flex-col gap-2.5">
-                    <div className="flex items-center justify-between">
-                      <h2 className="font-title text-title-md text-on-surface">
-                        Documentación Ley 18.251
-                      </h2>
-                      <span className="font-mono text-mono-sm text-success bg-success-container px-2 py-0.5 rounded-sm">
-                        Al día
-                      </span>
-                    </div>
-                    <div className="divide-y divide-outline-variant">
-                      {[
-                        { label: 'Certificado BPS', code: 'BPS-2026-11' },
-                        { label: 'Certificado Único DGI', code: 'DGI-884102' },
-                        { label: 'Póliza Accidentes BSE', code: 'BSE-99214' },
-                      ].map((doc) => (
-                        <div key={doc.code} className="py-2 flex items-center justify-between gap-2">
-                          <span className="font-label text-label-md text-on-surface">
-                            {doc.label}
-                          </span>
-                          <button
-                            type="button"
-                            onClick={() => showFeedback(`${doc.label} (${doc.code}) validado`)}
-                            className="font-mono text-mono-sm text-primary hover:underline cursor-pointer"
-                          >
-                            {doc.code}
-                          </button>
-                        </div>
-                      ))}
-                    </div>
-                  </section>
-
-                  <section className="bg-surface-container-lowest border border-outline-variant rounded-md p-3.5 flex flex-col gap-2.5">
-                    <h2 className="font-title text-title-md text-on-surface">
-                      Amenities · Barbacoa Piso 10
-                    </h2>
+                    <h2 className="font-title text-title-md text-on-surface">Barbacoa Piso 10</h2>
                     <button
                       type="button"
                       onClick={handleBarbacoaClick}
                       className="w-full py-2.5 px-4 rounded bg-primary text-on-primary font-label text-label-md cursor-pointer"
                     >
-                      {barbacoaReserved
-                        ? 'Barbacoa reservada hoy 20:00 hs ✓'
-                        : 'Reservar Barbacoa hoy 20:00 hs'}
+                      {barbacoaReserved ? 'Reservada hoy 20:00 hs ✓' : 'Reservar hoy 20:00 hs'}
                     </button>
                   </section>
                 </>
               )}
             </div>
 
-            {/* Guest WhatsApp Shared Pass Preview Overlay */}
+            {/* FULL-SCREEN LIVE INCOMING DOORBELL CALL MODAL ([Abrir Puerta] [Hablar] [Rechazar]) */}
+            {pendingVisit && pendingVisit.status === 'Pendiente' && (
+              <IncomingDoorbellModal
+                visit={pendingVisit}
+                liveSnapshotUrl={liveSnapshotUrl}
+                onApproveOpen={() => {
+                  onRespondVisit(true);
+                  showFeedback(`Puerta abierta para ${pendingVisit.visitorName}`);
+                }}
+                onReject={() => {
+                  onRespondVisit(false);
+                  showFeedback(`Visita de ${pendingVisit.visitorName} rechazada`);
+                }}
+                onSendVoiceMessage={onSendDoorbellVoiceReply}
+              />
+            )}
+
+            {/* Magic Link & WhatsApp Direct Share Modal */}
             {sharedPassPreview && (
-              <div className="absolute inset-0 z-40 bg-black/60 flex items-end sm:items-center justify-center p-3">
+              <div className="absolute inset-0 z-40 bg-black/65 flex items-end sm:items-center justify-center p-3">
                 <div className="w-full bg-surface-container-lowest rounded-lg border border-outline-variant p-4 flex flex-col gap-3 shadow-xl">
                   <div className="flex items-center justify-between border-b border-outline-variant pb-2">
-                    <div className="flex items-center gap-2">
-                      <span className="material-symbols-outlined text-secondary" aria-hidden="true">
-                        chat
-                      </span>
-                      <span className="font-title text-label-lg text-on-surface">
-                        Vista del Link WhatsApp (Visita)
-                      </span>
-                    </div>
+                    <span className="font-title text-label-lg text-on-surface">
+                      Pase listo para compartir (Magic Link + Voz)
+                    </span>
                     <button
                       type="button"
                       onClick={() => setSharedPassPreview(null)}
-                      aria-label="Cerrar vista previa"
-                      className="p-1 text-on-surface-variant hover:text-on-surface cursor-pointer"
+                      aria-label="Cerrar"
+                      className="p-1 text-on-surface-variant cursor-pointer"
                     >
                       <span className="material-symbols-outlined text-title-md" aria-hidden="true">
                         close
@@ -1536,50 +1604,78 @@ export function AppResidenteView({
 
                   <div className="p-3 rounded bg-surface-container-low border border-outline-variant flex flex-col gap-1">
                     <span className="font-label text-label-sm text-secondary">
-                      INVITACIÓN DE {BUILDING_INFO.activeResident.toUpperCase()} · APTO{' '}
-                      {BUILDING_INFO.activeUnit}
+                      INVITACIÓN PARA {sharedPassPreview.guestName.toUpperCase()}
                     </span>
                     <span className="font-headline text-title-md text-on-surface">
                       {BUILDING_INFO.address}
                     </span>
-                    <span className="font-body text-body-sm text-on-surface-variant">
-                      Cómo llegar: Entre Libertad y 21 de Setiembre · Frente táctil Zaguán IA
+                    <span className="font-mono text-[11px] text-primary break-all">
+                      {sharedPassPreview.magicLink || buildMagicLinkUrl(sharedPassPreview.code)}
                     </span>
                   </div>
 
-                  <div className="flex flex-col items-center gap-2 py-2">
-                    <div className="w-32 h-32 p-2 rounded-md bg-white border border-outline-variant">
+                  <div className="flex flex-col items-center gap-1.5 py-1">
+                    <div className="w-28 h-28 p-2 rounded-md bg-white border border-outline-variant">
                       <QrPreviewSvg seed={sharedPassPreview.code} />
                     </div>
-                    <span className="font-mono text-headline-sm text-primary font-bold tracking-widest">
-                      PIN: {sharedPassPreview.pin}
+                    <span className="font-label text-label-sm text-on-surface-variant">
+                      Código de voz (dictar al Portero IA):
+                    </span>
+                    <span className="font-mono text-headline-md text-primary font-bold tracking-widest">
+                      {sharedPassPreview.pin}
                     </span>
                     <span className="font-label text-label-sm text-on-surface-variant text-center">
-                      {sharedPassPreview.timeWindow || sharedPassPreview.validityLabel}
-                    </span>
-                    <span className="px-2 py-0.5 rounded-sm bg-warning-container text-on-warning-container font-label text-label-sm">
-                      Caducidad automática · Se destruye al ingresar
+                      {sharedPassPreview.validityLabel} · 1 solo uso
                     </span>
                   </div>
 
-                  <div className="grid grid-cols-2 gap-2">
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setSharedPassPreview(null);
-                        onNavigateMain('portero-ia');
-                      }}
-                      className="py-2 px-3 rounded bg-primary text-on-primary font-label text-label-sm cursor-pointer"
+                  <div className="flex flex-col gap-2">
+                    <a
+                      href={buildWhatsAppShareHref({
+                        guestName: sharedPassPreview.guestName,
+                        buildingAddress: BUILDING_INFO.address,
+                        unit: BUILDING_INFO.activeUnit,
+                        pin: sharedPassPreview.pin,
+                        validityLabel: sharedPassPreview.validityLabel,
+                        magicLink:
+                          sharedPassPreview.magicLink || buildMagicLinkUrl(sharedPassPreview.code),
+                      })}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="w-full py-2.5 px-3 rounded bg-[#128C7E] hover:bg-[#0E7368] text-white font-label text-label-md inline-flex items-center justify-center gap-2"
                     >
-                      Probar en Portero IA
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setSharedPassPreview(null)}
-                      className="py-2 px-3 rounded bg-surface-container border border-outline-variant font-label text-label-sm text-on-surface cursor-pointer"
-                    >
-                      Cerrar
-                    </button>
+                      <span className="material-symbols-outlined text-title-md" aria-hidden="true">
+                        chat
+                      </span>
+                      <span>Compartir directo por WhatsApp</span>
+                    </a>
+
+                    <div className="grid grid-cols-2 gap-2">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const link =
+                            sharedPassPreview.magicLink ||
+                            buildMagicLinkUrl(sharedPassPreview.code);
+                          navigator.clipboard?.writeText(link).catch(() => {});
+                          setCopiedMagicLink(true);
+                          setTimeout(() => setCopiedMagicLink(false), 1800);
+                        }}
+                        className="py-2 px-2 rounded bg-surface-container border border-outline-variant font-label text-label-sm text-on-surface cursor-pointer"
+                      >
+                        {copiedMagicLink ? 'Enlace copiado ✓' : 'Copiar Magic Link'}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setSharedPassPreview(null);
+                          onNavigateMain('portero-ia');
+                        }}
+                        className="py-2 px-2 rounded bg-primary text-on-primary font-label text-label-sm cursor-pointer"
+                      >
+                        Probar en E12W
+                      </button>
+                    </div>
                   </div>
                 </div>
               </div>
@@ -1593,7 +1689,7 @@ export function AppResidenteView({
               {(
                 [
                   { id: 'inicio', label: 'Inicio', icon: 'home' },
-                  { id: 'accesos', label: 'Accesos', icon: 'key' },
+                  { id: 'accesos', label: 'Pases', icon: 'key' },
                   { id: 'paquetes', label: 'Paquetes', icon: 'inventory_2' },
                   { id: 'consorcio', label: 'Edificio', icon: 'apartment' },
                 ] as { id: ResidentTab; label: string; icon: string }[]
@@ -1628,37 +1724,37 @@ export function AppResidenteView({
           </div>
         </div>
 
-        {/* Desktop Companion Panel */}
+        {/* Desktop Companion Panel: Live E12W Doorbell Tester + NFC HCE / BLE Diagnostics */}
         <aside className="hidden lg:flex lg:col-span-7 flex-col gap-gutter-lg">
           <div className="bg-surface-container-lowest border border-outline-variant rounded-md p-6 flex flex-col gap-4">
             <div className="flex flex-wrap items-center justify-between gap-3">
               <div>
                 <h2 className="font-headline text-headline-sm text-on-surface">
-                  App Residente · Control en 2 toques
+                  App Residente · Akuvox E12W + NFC HCE + BLE 5.0
                 </h2>
                 <p className="font-body text-body-md text-on-surface-variant">
-                  Todos los pases QR/PIN, horarios de personal, pre-autorizaciones de paquetes y
-                  PIN de coacción funcionan en vivo con la pantalla del Portero IA.
+                  Probá la recepción de timbre en vivo con foto + [Abrir / Hablar / Rechazar],
+                  emulación NFC HCE 13.56 MHz para Android y puente BLE universal.
                 </p>
               </div>
               <button
                 type="button"
-                onClick={() => onNavigateMain('portero-ia')}
-                className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded bg-primary text-on-primary hover:bg-primary-container font-label text-label-md whitespace-nowrap shrink-0 cursor-pointer"
+                onClick={onSimulateIncomingDoorbell}
+                className="inline-flex items-center gap-1.5 px-4 py-2.5 rounded bg-secondary text-on-secondary hover:opacity-95 font-label text-label-md whitespace-nowrap shrink-0 cursor-pointer"
               >
                 <span className="material-symbols-outlined text-title-md" aria-hidden="true">
-                  record_voice_over
+                  notifications_active
                 </span>
-                <span>Probar en Portero IA</span>
+                <span>Simular Timbre E12W en Vivo</span>
               </button>
             </div>
 
             <div className="grid grid-cols-4 gap-2 pt-2 border-t border-outline-variant">
               {(
                 [
-                  { id: 'inicio', label: 'Inicio + BT/NFC', icon: 'home' },
-                  { id: 'accesos', label: 'QR / Personal / SOS', icon: 'key' },
-                  { id: 'paquetes', label: 'Paquetería IA', icon: 'inventory_2' },
+                  { id: 'inicio', label: 'Apertura + NFC/BLE', icon: 'home' },
+                  { id: 'accesos', label: 'Pases + RFID', icon: 'key' },
+                  { id: 'paquetes', label: 'Paquetería OCR', icon: 'inventory_2' },
                   { id: 'consorcio', label: 'Comunicados', icon: 'apartment' },
                 ] as { id: ResidentTab; label: string; icon: string }[]
               ).map((screen) => (
@@ -1666,10 +1762,10 @@ export function AppResidenteView({
                   key={screen.id}
                   type="button"
                   onClick={() => onChangeTab(screen.id)}
-                  className={`flex items-center justify-center gap-1.5 py-2.5 px-2 rounded border font-label text-label-sm transition-colors whitespace-nowrap cursor-pointer ${
+                  className={`flex items-center justify-center gap-1.5 py-2.5 px-2 rounded border font-label text-label-sm whitespace-nowrap cursor-pointer ${
                     activeTab === screen.id
                       ? 'bg-primary text-on-primary border-primary'
-                      : 'bg-surface-container-low text-on-surface border-outline-variant hover:bg-surface-container'
+                      : 'bg-surface-container-low text-on-surface border-outline-variant'
                   }`}
                 >
                   <span className="material-symbols-outlined text-title-md" aria-hidden="true">
@@ -1681,51 +1777,58 @@ export function AppResidenteView({
             </div>
           </div>
 
-          {/* Live Relays & Credentials Telemetry */}
-          <div className="grid grid-cols-3 gap-gutter-md">
-            <div className="bg-surface-container-lowest border border-outline-variant rounded-md p-4 flex flex-col gap-1">
-              <span className="font-label text-label-sm text-on-surface-variant">
-                Doble Exclusa PB
+          {/* Modular NFC HCE & BLE Bridge Technical Telemetry */}
+          <div className="grid grid-cols-2 gap-gutter-md">
+            <div className="bg-surface-container-lowest border border-outline-variant rounded-md p-4 flex flex-col gap-1.5">
+              <div className="flex items-center justify-between">
+                <span className="font-label text-label-sm text-primary">
+                  NFC HCE (Android 13.56 MHz)
+                </span>
+                <span
+                  className={`font-mono text-[11px] px-2 py-0.5 rounded-sm ${
+                    nfcSession?.active
+                      ? 'bg-success-container text-on-success-container'
+                      : 'bg-surface-container text-on-surface-variant'
+                  }`}
+                >
+                  {nfcSession?.active ? 'EMULANDO' : 'STANDBY'}
+                </span>
+              </div>
+              <span className="font-mono text-title-md text-on-surface">
+                UID: {residentHceUid}
               </span>
-              <span
-                className={`font-headline text-title-lg tabular-nums ${
-                  door2Countdown > 0 || door1Countdown > 0 ? 'text-success' : 'text-on-surface'
-                }`}
-              >
-                {door2Countdown > 0
-                  ? `Completa (${door2Countdown}s)`
-                  : door1Countdown > 0
-                    ? `Solo Zaguán (${door1Countdown}s)`
-                    : 'Bloqueada'}
+              <span className="font-mono text-[11px] text-on-surface-variant">
+                AID: F05A414755414E01 (ISO-DEP)
               </span>
-              <span className="font-mono text-mono-sm text-on-surface-variant">
-                BT/NFC + Relé IP
-              </span>
+              <p className="font-body text-body-sm text-on-surface-variant">
+                {nfcCapabilities.reason}
+              </p>
             </div>
 
-            <div className="bg-surface-container-lowest border border-outline-variant rounded-md p-4 flex flex-col gap-1">
-              <span className="font-label text-label-sm text-on-surface-variant">
-                PIN Personal / Coacción
+            <div className="bg-surface-container-lowest border border-outline-variant rounded-md p-4 flex flex-col gap-1.5">
+              <div className="flex items-center justify-between">
+                <span className="font-label text-label-sm text-secondary">
+                  Puente BLE 5.0 (iOS + Android)
+                </span>
+                <span
+                  className={`font-mono text-[11px] px-2 py-0.5 rounded-sm ${
+                    bleState.inRange
+                      ? 'bg-success-container text-on-success-container'
+                      : 'bg-warning-container text-on-warning-container'
+                  }`}
+                >
+                  {bleState.inRange ? 'EN RANGO' : 'LEJOS'}
+                </span>
+              </div>
+              <span className="font-mono text-title-md text-on-surface tabular-nums">
+                {bleState.rssiDbm} dBm · {bleState.estimatedMeters} m
               </span>
-              <span className="font-headline text-title-lg text-primary tabular-nums">
-                {residentPin} / <span className="text-error">{duressPin}</span>
+              <span className="font-mono text-[11px] text-on-surface-variant">
+                Dispositivo: {bleState.deviceLabel}
               </span>
-              <span className="font-mono text-mono-sm text-on-surface-variant">
-                Alerta silenciosa activa
-              </span>
-            </div>
-
-            <div className="bg-surface-container-lowest border border-outline-variant rounded-md p-4 flex flex-col gap-1">
-              <span className="font-label text-label-sm text-on-surface-variant">
-                Accesos y Envíos
-              </span>
-              <span className="font-headline text-title-lg text-on-surface tabular-nums">
-                {passes.filter((p) => p.status === 'Activo').length} 1-uso ·{' '}
-                {recurringPasses.filter((r) => r.status === 'Activo').length} rec.
-              </span>
-              <span className="font-mono text-mono-sm text-on-surface-variant">
-                {activeUnitPreAuth.length} pre-aut · {pendingParcels.length} paq.
-              </span>
+              <p className="font-body text-body-sm text-on-surface-variant">
+                Transporte: <strong>{bleState.transportMode}</strong> (umbral ≥ -68 dBm)
+              </p>
             </div>
           </div>
 
@@ -1737,13 +1840,13 @@ export function AppResidenteView({
                   Registro de auditoría en tiempo real
                 </h3>
                 <p className="font-body text-body-sm text-on-surface-variant">
-                  Sincronizado entre App Residente, Portero IA y Panel Administración
+                  Sincronizado entre App Residente, Akuvox E12W y Panel Admin
                 </p>
               </div>
-              <span className="font-mono text-mono-sm text-secondary">AUDIO / OCR / RFID</span>
+              <span className="font-mono text-mono-sm text-secondary">HCE · BLE · SIP</span>
             </div>
 
-            <div className="divide-y divide-outline-variant max-h-[340px] overflow-y-auto">
+            <div className="divide-y divide-outline-variant max-h-[300px] overflow-y-auto">
               {activities.map((act) => (
                 <div key={act.id} className="px-6 py-3 flex items-center justify-between gap-4">
                   <div className="flex flex-col gap-0.5 min-w-0">

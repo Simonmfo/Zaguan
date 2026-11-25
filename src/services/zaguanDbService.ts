@@ -8,6 +8,8 @@ import {
   BuildingTenant,
   BuildingUnit,
   MasterKeyRecord,
+  QrPass,
+  RecurringPass,
   UserRole,
 } from '../types/zaguan';
 
@@ -138,6 +140,56 @@ export async function syncMasterKeyToSupabase(mk: MasterKeyRecord): Promise<void
     access_scope: mk.scope,
     status: 'active',
   });
+}
+
+export async function syncSingleUsePassToSupabase(
+  buildingId: string,
+  pass: QrPass
+): Promise<void> {
+  const client = getSupabaseClient();
+  if (!client) return;
+  await client.from('access_passes').insert({
+    building_id: buildingId,
+    holder_name: pass.guestName,
+    pass_type: 'one_time',
+    method: 'magic_link',
+    valid_from: new Date().toISOString(),
+    valid_until: pass.validUntilIso || new Date(Date.now() + 2 * 3600 * 1000).toISOString(),
+    pin_code: pass.pin,
+    qr_token: pass.code,
+    access_scope: pass.accessScope,
+    status: 'active',
+  });
+}
+
+export async function syncRecurringPassToSupabase(
+  buildingId: string,
+  staff: RecurringPass
+): Promise<void> {
+  const client = getSupabaseClient();
+  if (!client) return;
+  await client.from('access_passes').insert({
+    building_id: buildingId,
+    holder_name: `${staff.name} (${staff.role})`,
+    pass_type: 'recurring_schedule',
+    method: staff.rfidTag ? 'rfid_tag' : 'nfc_hce',
+    days_of_week: staff.days,
+    start_time: staff.startTime,
+    end_time: staff.endTime,
+    pin_code: staff.pin,
+    rfid_tag_uid: staff.rfidTag || null,
+    access_scope: `Acceso personal Apto ${staff.unit}`,
+    status: 'active',
+  });
+}
+
+export async function revokePassInSupabase(qrOrPin: string): Promise<void> {
+  const client = getSupabaseClient();
+  if (!client) return;
+  await client
+    .from('access_passes')
+    .update({ status: 'revoked', revoked_at: new Date().toISOString() })
+    .or(`qr_token.eq.${qrOrPin},pin_code.eq.${qrOrPin}`);
 }
 
 export async function syncNoticeToSupabase(

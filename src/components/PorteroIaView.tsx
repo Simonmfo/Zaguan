@@ -250,6 +250,25 @@ export function PorteroIaView({
     pushBubble('visitante', text);
     const lower = text.toLowerCase();
 
+    // 0. Check if visitor dictated a 4-digit voice code (e.g. "Tengo el código 7310")
+    const voicePinMatch = text.match(/(?:c[oó]digo|pin|clave|n[uú]mero)?\s*\b(\d{4})\b/i);
+    if (
+      voicePinMatch &&
+      (lower.includes('código') ||
+        lower.includes('codigo') ||
+        lower.includes('pin') ||
+        lower.includes('clave') ||
+        /^\d{4}$/.test(text))
+    ) {
+      const spokenCode = voicePinMatch[1];
+      const simDay: DayOfWeek = simScheduleSlot === 'allowed' ? 'M' : 'L';
+      const simHour = simScheduleSlot === 'allowed' ? '09:30' : '19:00';
+      const res = onValidatePinOrQr(spokenCode, simDay, simHour);
+      pushBubble('ia', res.message);
+      setPinFeedback({ ok: res.ok, text: res.message });
+      return;
+    }
+
     // 1. Check if it's a parcel / delivery utterance
     const isParcel =
       lower.includes('paquete') ||
@@ -814,6 +833,17 @@ export function PorteroIaView({
                   )}
 
                   <div className="flex flex-wrap gap-1.5">
+                    {activePasses[0] && (
+                      <button
+                        type="button"
+                        onClick={() =>
+                          processNaturalUtterance(`Tengo el código ${activePasses[0].pin}`)
+                        }
+                        className="px-2.5 py-1 rounded bg-emerald-500/20 hover:bg-emerald-500/30 border border-emerald-400/30 font-label text-label-sm text-emerald-200 cursor-pointer"
+                      >
+                        &ldquo;Tengo el código {activePasses[0].pin}&rdquo; (Voz 1 uso)
+                      </button>
+                    )}
                     <button
                       type="button"
                       onClick={() =>

@@ -13,13 +13,20 @@ import {
 } from './services/akuvoxService';
 import {
   deactivateTenantInSupabase,
+  revokePassInSupabase,
   subscribeToAccessLogsRealtime,
   syncAccessLogToSupabase,
   syncMasterKeyToSupabase,
   syncNoticeToSupabase,
+  syncRecurringPassToSupabase,
+  syncSingleUsePassToSupabase,
   syncTenantToSupabase,
   syncUnitToSupabase,
 } from './services/zaguanDbService';
+import {
+  isRecurringPassAllowedAt,
+  isSingleUsePassValidNow,
+} from './utils/accessValidation';
 import {
   ASSETS,
   BUILDING_INFO,
@@ -192,7 +199,7 @@ export default function App() {
     [activeBuildingId, liveSnapshotUrl]
   );
 
-  // Automatic real-time expiration of temporary Master Keys (checks every 5s)
+  // Automatic real-time expiration of temporary Master Keys & Single-use Passes (checks every 5s)
   useEffect(() => {
     const timer = setInterval(() => {
       const nowMs = Date.now();
@@ -208,6 +215,25 @@ export default function App() {
             return { ...mk, status: 'Expirada' as const };
           }
           return mk;
+        });
+        return changed ? next : prev;
+      });
+      setPasses((prev) => {
+        let changed = false;
+        const next = prev.map((p) => {
+          if (
+            p.status === 'Activo' &&
+            p.validUntilIso &&
+            new Date(p.validUntilIso).getTime() <= nowMs
+          ) {
+            changed = true;
+            return {
+              ...p,
+              status: 'Expirado' as const,
+              detailText: `Expirado automáticamente · Voz ${p.pin}`,
+            };
+          }
+          return p;
         });
         return changed ? next : prev;
       });
@@ -421,7 +447,7 @@ export default function App() {
   };
 
   // --- Direct Door Unlock ---
-  const handleUnlockDirectDoor = (method: 'app' | 'bt-nfc') => {
+  const handleUnlockDirectDoor = (method: 'app' | 'bt-nfc', detail?: string) => {
     setDoor1Countdown(8);
     setDoor2Countdown(8);
     void dispatchHardwareRelay(1);
@@ -431,9 +457,9 @@ export default function App() {
     handleLogActivity({
       title:
         method === 'bt-nfc'
-          ? 'Puerta abierta por Bluetooth / NFC (Akuvox E12W)'
+          ? 'Puerta abierta por NFC HCE / BLE 5.0 (Akuvox E12W)'
           : 'Puerta principal abierta desde App (Relé E12W)',
-      subtitle: `Acceso completo (Exclusas 1 y 2) · Apto ${BUILDING_INFO.activeUnit}`,
+      subtitle: detail || `Acceso completo (Exclusas 1 y 2) · Apto ${BUILDING_INFO.activeUnit}`,
       time: nowTime(),
       category: 'acceso',
     });
@@ -442,9 +468,10 @@ export default function App() {
   // --- Single-use Passes ---
   const handleCreatePass = (newPass: QrPass) => {
     setPasses((prev) => [newPass, ...prev]);
+    void syncSingleUsePassToSupabase(activeBuildingId, newPass);
     handleLogActivity({
-      title: `Pase 1 uso PIN ${newPass.pin} creado (${newPass.typeLabel})`,
-      subtitle: `${newPass.guestName} · ${newPass.validityLabel} · Link WhatsApp`,
+      title: `Pase 1 uso código voz ${newPass.pin} creado (${newPass.typeLabel})`,
+      subtitle: `${newPass.guestName} · ${newPass.validityLabel} · Magic Link WhatsApp`,
       time: nowTime(),
       category: 'qr',
     });
@@ -454,12 +481,13 @@ export default function App() {
     setPasses((prev) =>
       prev.map((p) =>
         p.id === passId
-          ? { ...p, status: 'Revocado', detailText: `Revocado · PIN ${p.pin}` }
+          ? { ...p, status: 'Revocado', detailText: `Revocado · Voz ${p.pin}` }
           : p
       )
     );
     const target = passes.find((p) => p.id === passId);
     if (target) {
+      void revokePassInSupabase(target.code);
       handleLogActivity({
         title: `Pase ${target.code} revocado al instante`,
         subtitle: target.guestName,
@@ -481,9 +509,12 @@ export default function App() {
       auditLog: [],
     };
     setRecurringPasses((prev) => [created, ...prev]);
+    void syncRecurringPassToSupabase(activeBuildingId, created);
     handleLogActivity({
-      title: `Perfil recurrente creado: ${staff.name} (${staff.role})`,
-      subtitle: `Días ${staff.days.join('/')} · ${staff.startTime}–${staff.endTime} · ${staff.rfidTag}`,
+      title: `Permiso recurrente creado: ${staff.name} (${staff.role})`,
+      subtitle: `Días ${staff.days.join('/')} · ${staff.startTime}–${staff.endTime} · ${
+        staff.rfidTag ? `RFID ${staff.rfidTag}` : 'Acceso móvil'
+      }`,
       time: nowTime(),
       category: 'acceso',
     });
@@ -495,9 +526,10 @@ export default function App() {
       prev.map((r) => (r.id === id ? { ...r, status: 'Revocado', currentlyInside: false } : r))
     );
     if (target) {
+      void revokePassInSupabase(target.pin);
       handleLogActivity({
-        title: `Acceso de ${target.name} eliminado en 1 seg`,
-        subtitle: `PIN ${target.pin} y Tag ${target.rfidTag} invalidados`,
+        title: `Permiso de ${target.name} revocado al instante`,
+        subtitle: `PIN ${target.pin}${target.rfidTag ? ` y RFID ${target.rfidTag}` : ''} invalidados`,
         time: nowTime(),
         category: 'acceso',
       });
@@ -811,15 +843,16 @@ export default function App() {
       };
     }
 
-    // 3. Single-use QR / PIN passes (auto-destroys immediately on use!)
+    // 3. Single-use QR / Voice Code passes (strict expiration + auto-destroys immediately on use!)
     const matchedPass = passes.find(
       (p) => p.pin.toUpperCase() === clean || p.code.toUpperCase() === clean
     );
     if (matchedPass) {
-      if (matchedPass.status !== 'Activo') {
+      const validity = isSingleUsePassValidNow(matchedPass);
+      if (!validity.ok) {
         return {
           ok: false,
-          message: `Código ${matchedPass.pin} inválido (${matchedPass.status}). Los pases de 1 uso se destruyen al utilizarse.`,
+          message: `Código ${matchedPass.pin} rechazado: ${validity.reason}`,
         };
       }
       setDoor1Countdown(10);
@@ -838,7 +871,7 @@ export default function App() {
       );
       handleLogActivity({
         title: `Pase 1 uso ${matchedPass.code} utilizado y destruido`,
-        subtitle: `${matchedPass.guestName} · Caducidad automática ejecutada`,
+        subtitle: `${matchedPass.guestName} · Código voz ${matchedPass.pin} · Apto ${matchedPass.unit || '4B'}`,
         time: nowTime(),
         category: 'qr',
       });
@@ -850,31 +883,22 @@ export default function App() {
 
     // 4. Recurring Staff Passes (strict day & time schedule enforcement!)
     const matchedStaff = recurringPasses.find(
-      (r) => r.pin.toUpperCase() === clean || r.rfidTag.toUpperCase() === clean
+      (r) =>
+        (r.mobileAccessEnabled && r.pin.toUpperCase() === clean) ||
+        (r.rfidTag && r.rfidTag.toUpperCase() === clean)
     );
     if (matchedStaff) {
-      if (matchedStaff.status !== 'Activo') {
-        return {
-          ok: false,
-          message: `Acceso denegado: el perfil de ${matchedStaff.name} fue revocado por el residente.`,
-        };
-      }
-      const allowedDay = matchedStaff.days.includes(simDay);
-      const nowMin = timeToMinutes(simHour);
-      const startMin = timeToMinutes(matchedStaff.startTime);
-      const endMin = timeToMinutes(matchedStaff.endTime);
-      const allowedHour = nowMin >= startMin && nowMin <= endMin;
-
-      if (!allowedDay || !allowedHour) {
+      const scheduleCheck = isRecurringPassAllowedAt(matchedStaff, simDay, simHour);
+      if (!scheduleCheck.ok) {
         handleLogActivity({
           title: `Intento fuera de horario bloqueado: ${matchedStaff.name}`,
-          subtitle: `Intentó ingresar ${simDay} ${simHour} (Permitido: ${matchedStaff.days.join('/')} ${matchedStaff.startTime}–${matchedStaff.endTime})`,
+          subtitle: `${scheduleCheck.reason} · Apto ${matchedStaff.unit}`,
           time: nowTime(),
           category: 'alerta',
         });
         return {
           ok: false,
-          message: `BLOQUEADO: ${matchedStaff.name} (${matchedStaff.role}) solo tiene permiso los días ${matchedStaff.days.join(', ')} de ${matchedStaff.startTime} a ${matchedStaff.endTime} hs.`,
+          message: `BLOQUEADO: ${matchedStaff.name} (${matchedStaff.role}) — ${scheduleCheck.reason}`,
         };
       }
 
@@ -884,7 +908,7 @@ export default function App() {
       handleToggleStaffShift(matchedStaff.id);
       return {
         ok: true,
-        message: `Acceso autorizado: ${matchedStaff.name} (${matchedStaff.role}). Notificación silenciosa enviada al Apto ${matchedStaff.unit}.`,
+        message: `Acceso autorizado: ${matchedStaff.name} (${matchedStaff.role}). Notificación push enviada al Apto ${matchedStaff.unit}.`,
       };
     }
 
@@ -1182,7 +1206,24 @@ export default function App() {
           unannouncedRule={unannouncedRule}
           onChangeUnannouncedRule={setUnannouncedRule}
           pendingVisit={pendingVisit}
+          liveSnapshotUrl={liveSnapshotUrl}
           onRespondVisit={handleRespondVisit}
+          onSimulateIncomingDoorbell={() =>
+            handleRequestVisitApproval(
+              'Lucas Fernández',
+              BUILDING_INFO.activeResident,
+              BUILDING_INFO.activeUnit,
+              'Vengo a ver a Martín del 4B, soy Lucas. Traigo unos documentos.'
+            )
+          }
+          onSendDoorbellVoiceReply={(msg) =>
+            handleLogActivity({
+              title: 'Mensaje de voz enviado al altavoz E12W',
+              subtitle: `"${msg}" · Apto ${BUILDING_INFO.activeUnit}`,
+              time: nowTime(),
+              category: 'ia',
+            })
+          }
           pendingSpontaneous={pendingSpontaneous}
           onRespondSpontaneousParcel={handleRespondSpontaneousParcel}
           residentPin={residentPin}
