@@ -5,6 +5,62 @@ export type MainScreen =
   | 'panel-admin'
   | 'modulo-retrofit';
 
+export type UserRole = 'super_admin' | 'building_admin' | 'resident' | 'staff';
+
+export type AccessPassType = 'one_time' | 'recurring_schedule' | 'permanent';
+
+export type AccessPassMethod = 'magic_link' | 'nfc_hce' | 'rfid_tag' | 'voice_code';
+
+export type AccessPassStatus = 'active' | 'used' | 'revoked' | 'expired';
+
+export type AccessEventSource =
+  | 'remote_app'
+  | 'ai_voice'
+  | 'access_pass'
+  | 'master_key'
+  | 'package_ocr'
+  | 'duress_pin'
+  | 'loitering_alert'
+  | 'admin_action';
+
+export interface BuildingRecord {
+  id: string;
+  name: string;
+  address: string;
+  city: string;
+  parcelStorageMode: ParcelStorageMode;
+  parcelHoursStart: string;
+  parcelHoursEnd: string;
+  spontaneousTimeoutSec: number;
+  akuvoxIp: string;
+  akuvoxApiUser: string;
+}
+
+export interface BuildingUnit {
+  id: string;
+  buildingId: string;
+  unitNumber: string;
+  floor: number;
+  towerBlock?: string;
+  isOccupied: boolean;
+}
+
+export interface AccessLogRecord {
+  id: string;
+  buildingId: string;
+  unit?: string;
+  actorName: string;
+  eventSource: AccessEventSource;
+  methodUsed: string;
+  direction: 'entry' | 'exit' | 'alert' | 'system';
+  granted: boolean;
+  snapshotUrl?: string;
+  notes: string;
+  occurredAtIso: string;
+  dateKey: string; // YYYY-MM-DD for date filtering
+  timeLabel: string; // HH:MM
+}
+
 export type IntercomHardwareModel = 'akuvox-e12w' | 'kiosco-10';
 
 export interface AkuvoxConfig {
@@ -173,8 +229,11 @@ export interface SecurityAlert {
 
 export interface BuildingTenant {
   id: string;
+  buildingId: string;
   unit: string;
+  role: UserRole;
   name: string;
+  email?: string;
   phone: string;
   personalPin: string;
   duressPin: string;
@@ -185,12 +244,14 @@ export interface BuildingTenant {
 
 export interface MasterKeyRecord {
   id: string;
+  buildingId: string;
   provider: 'UTE' | 'OSE' | 'Antel' | 'Ascensores' | 'Bomberos' | 'Sanitaria';
   technicianName: string;
   pin: string;
   scope: string;
   validUntil: string;
-  status: 'Activa' | 'En edificio' | 'Finalizada' | 'Revocada';
+  expiresAtIso: string;
+  status: 'Activa' | 'En edificio' | 'Finalizada' | 'Expirada' | 'Revocada';
   enteredAt?: string;
   exitedAt?: string;
 }

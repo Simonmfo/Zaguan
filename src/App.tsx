@@ -12,9 +12,20 @@ import {
   triggerAkuvoxDoor,
 } from './services/akuvoxService';
 import {
+  deactivateTenantInSupabase,
+  subscribeToAccessLogsRealtime,
+  syncAccessLogToSupabase,
+  syncMasterKeyToSupabase,
+  syncNoticeToSupabase,
+  syncTenantToSupabase,
+  syncUnitToSupabase,
+} from './services/zaguanDbService';
+import {
   ASSETS,
   BUILDING_INFO,
+  INITIAL_ACCESS_LOGS,
   INITIAL_ACTIVITY,
+  INITIAL_BUILDINGS,
   INITIAL_MASTER_KEYS,
   INITIAL_NOTICES,
   INITIAL_PARCELS,
@@ -23,14 +34,19 @@ import {
   INITIAL_RECURRING_PASSES,
   INITIAL_SECURITY_ALERTS,
   INITIAL_TENANTS,
+  INITIAL_UNITS,
   computeDuressPin,
 } from './data/zaguanData';
 import {
+  AccessEventSource,
+  AccessLogRecord,
   ActivityEvent,
   AkuvoxConfig,
   AkuvoxLogEntry,
   BuildingNotice,
+  BuildingRecord,
   BuildingTenant,
+  BuildingUnit,
   DayOfWeek,
   EstimatorBrandKey,
   IntercomHardwareModel,
@@ -47,6 +63,7 @@ import {
   SecurityAlert,
   SurveyRequest,
   UnannouncedParcelRule,
+  UserRole,
 } from './types/zaguan';
 
 function timeToMinutes(hhmm: string): number {
@@ -107,19 +124,109 @@ export default function App() {
     null
   );
 
-  // Admin Panel state
+  // Multi-building, Roles & Admin Panel state
+  const [buildings] = useState<BuildingRecord[]>(INITIAL_BUILDINGS);
+  const [activeBuildingId, setActiveBuildingId] = useState<string>(INITIAL_BUILDINGS[0].id);
+  const [currentRole, setCurrentRole] = useState<UserRole>('building_admin');
+  const [units, setUnits] = useState<BuildingUnit[]>(INITIAL_UNITS);
   const [tenants, setTenants] = useState<BuildingTenant[]>(INITIAL_TENANTS);
   const [masterKeys, setMasterKeys] = useState<MasterKeyRecord[]>(INITIAL_MASTER_KEYS);
   const [notices, setNotices] = useState<BuildingNotice[]>(INITIAL_NOTICES);
   const [securityAlerts, setSecurityAlerts] = useState<SecurityAlert[]>(INITIAL_SECURITY_ALERTS);
+  const [accessLogs, setAccessLogs] = useState<AccessLogRecord[]>(INITIAL_ACCESS_LOGS);
 
   const nowTime = useCallback(
     () => new Date().toLocaleTimeString('es-UY', { hour: '2-digit', minute: '2-digit' }),
     []
   );
 
-  const handleLogActivity = useCallback((event: Omit<ActivityEvent, 'id'>) => {
-    setActivities((prev) => [{ ...event, id: `act-${Date.now()}-${Math.random()}` }, ...prev]);
+  const handleLogActivity = useCallback(
+    (event: Omit<ActivityEvent, 'id'>) => {
+      setActivities((prev) => [{ ...event, id: `act-${Date.now()}-${Math.random()}` }, ...prev]);
+
+      // Mirror every event into structured `access_logs` for real-time Admin filtering + Supabase sync
+      const sourceMap: Record<ActivityEvent['category'], AccessEventSource> = {
+        acceso: 'remote_app',
+        qr: 'access_pass',
+        paquete: 'package_ocr',
+        alerta: event.title.toLowerCase().includes('coacción') ? 'duress_pin' : 'loitering_alert',
+        ia: 'ai_voice',
+        admin: 'admin_action',
+      };
+      const unitMatch = `${event.title} ${event.subtitle}`.match(/Apto\s+([A-Z0-9]+)/i);
+      const now = new Date();
+      const iso = now.toISOString();
+      const newLog: AccessLogRecord = {
+        id: `log-${Date.now()}-${Math.random()}`,
+        buildingId: activeBuildingId,
+        unit: unitMatch ? unitMatch[1].toUpperCase() : undefined,
+        actorName: event.title,
+        eventSource: event.title.toLowerCase().includes('llave maestra')
+          ? 'master_key'
+          : sourceMap[event.category],
+        methodUsed: event.category === 'paquete' ? 'OCR / Exclusa E12W' : event.category.toUpperCase(),
+        direction:
+          event.category === 'alerta'
+            ? 'alert'
+            : event.title.toLowerCase().includes('salió') ||
+                event.title.toLowerCase().includes('salida')
+              ? 'exit'
+              : event.category === 'admin'
+                ? 'system'
+                : 'entry',
+        granted: !event.title.toLowerCase().includes('bloqueado') && !event.title.toLowerCase().includes('rechazad'),
+        snapshotUrl:
+          event.category === 'paquete'
+            ? ASSETS.parcelReception
+            : event.category === 'ia' || event.category === 'alerta'
+              ? liveSnapshotUrl || ASSETS.lobbyCamera
+              : undefined,
+        notes: event.subtitle,
+        occurredAtIso: iso,
+        dateKey: iso.slice(0, 10),
+        timeLabel: event.time,
+      };
+      setAccessLogs((prev) => [newLog, ...prev]);
+      void syncAccessLogToSupabase(newLog);
+    },
+    [activeBuildingId, liveSnapshotUrl]
+  );
+
+  // Automatic real-time expiration of temporary Master Keys (checks every 5s)
+  useEffect(() => {
+    const timer = setInterval(() => {
+      const nowMs = Date.now();
+      setMasterKeys((prev) => {
+        let changed = false;
+        const next = prev.map((mk) => {
+          if (
+            (mk.status === 'Activa' || mk.status === 'En edificio') &&
+            mk.expiresAtIso &&
+            new Date(mk.expiresAtIso).getTime() <= nowMs
+          ) {
+            changed = true;
+            return { ...mk, status: 'Expirada' as const };
+          }
+          return mk;
+        });
+        return changed ? next : prev;
+      });
+    }, 5000);
+    return () => clearInterval(timer);
+  }, []);
+
+  // Optional Supabase Realtime subscription for `access_logs`
+  useEffect(() => {
+    const channel = subscribeToAccessLogsRealtime((rtLog) => {
+      setAccessLogs((prev) =>
+        prev.some((existing) => existing.id === rtLog.id) ? prev : [rtLog, ...prev]
+      );
+    });
+    return () => {
+      if (channel) {
+        void channel.unsubscribe();
+      }
+    };
   }, []);
 
   const handleLogAkuvoxProtocol = useCallback(
@@ -784,7 +891,12 @@ export default function App() {
     // 5. Admin Temporary Master Keys (UTE, OSE, Antel, Ascensores, Bomberos)
     const matchedMaster = masterKeys.find((m) => m.pin.toUpperCase() === clean);
     if (matchedMaster) {
-      if (matchedMaster.status === 'Revocada' || matchedMaster.status === 'Finalizada') {
+      if (
+        matchedMaster.status === 'Revocada' ||
+        matchedMaster.status === 'Finalizada' ||
+        matchedMaster.status === 'Expirada' ||
+        new Date(matchedMaster.expiresAtIso).getTime() <= Date.now()
+      ) {
         return {
           ok: false,
           message: `Llave maestra ${matchedMaster.provider} expirada o revocada.`,
@@ -807,12 +919,40 @@ export default function App() {
   };
 
   // --- Admin Panel Actions ---
-  const handleAddTenant = (unit: string, name: string, phone: string) => {
+  const handleAddUnit = (unitNumber: string, floor: number, towerBlock?: string) => {
+    const created: BuildingUnit = {
+      id: `unit-${Date.now()}`,
+      buildingId: activeBuildingId,
+      unitNumber,
+      floor,
+      towerBlock,
+      isOccupied: false,
+    };
+    setUnits((prev) => [...prev, created]);
+    void syncUnitToSupabase(created);
+    handleLogActivity({
+      title: `Unidad Apto ${unitNumber} creada (Piso ${floor})`,
+      subtitle: `Edificio ${activeBuildingId}`,
+      time: nowTime(),
+      category: 'admin',
+    });
+  };
+
+  const handleAddTenant = (
+    unit: string,
+    name: string,
+    phone: string,
+    role: UserRole = 'resident',
+    email?: string
+  ) => {
     const newPin = String(Math.floor(1000 + Math.random() * 8999));
     const created: BuildingTenant = {
       id: `ten-${Date.now()}`,
+      buildingId: activeBuildingId,
       unit,
+      role,
       name,
+      email,
       phone,
       personalPin: newPin,
       duressPin: computeDuressPin(newPin),
@@ -821,9 +961,20 @@ export default function App() {
       moveInDate: 'Hoy',
     };
     setTenants((prev) => [created, ...prev]);
+    setUnits((prev) =>
+      prev.map((u) =>
+        u.buildingId === activeBuildingId && u.unitNumber === unit
+          ? { ...u, isOccupied: true }
+          : u
+      )
+    );
+    const matchingUnit = units.find(
+      (u) => u.buildingId === activeBuildingId && u.unitNumber === unit
+    );
+    void syncTenantToSupabase(created, matchingUnit?.id);
     handleLogActivity({
-      title: `Alta de inquilino: ${name} (Apto ${unit})`,
-      subtitle: 'App residente habilitada con PIN personal y coacción',
+      title: `Alta de ${role}: ${name} (Apto ${unit})`,
+      subtitle: 'Credenciales emitidas con PIN personal y PIN de coacción',
       time: nowTime(),
       category: 'admin',
     });
@@ -850,9 +1001,10 @@ export default function App() {
         r.unit === target.unit ? { ...r, status: 'Revocado', currentlyInside: false } : r
       )
     );
+    void deactivateTenantInSupabase(tenantId);
     handleLogActivity({
       title: `Baja en 1 clic: ${target.name} (Apto ${target.unit})`,
-      subtitle: 'Todos sus códigos QR, PINs y tags RFID desaparecieron al instante',
+      subtitle: 'Todos sus códigos QR, PINs y tags RFID fueron revocados automáticamente',
       time: nowTime(),
       category: 'admin',
     });
@@ -862,22 +1014,30 @@ export default function App() {
     provider: MasterKeyRecord['provider'],
     technicianName: string,
     scope: string,
-    validUntil: string
+    durationMinutes: number
   ) => {
     const pin = String(Math.floor(1000 + Math.random() * 8999));
+    const expiresDate = new Date(Date.now() + durationMinutes * 60 * 1000);
+    const validUntil = expiresDate.toLocaleTimeString('es-UY', {
+      hour: '2-digit',
+      minute: '2-digit',
+    });
     const record: MasterKeyRecord = {
       id: `mk-${Date.now()}`,
+      buildingId: activeBuildingId,
       provider,
       technicianName,
       pin,
       scope,
-      validUntil,
+      validUntil: `Hoy ${validUntil} hs (${durationMinutes} min)`,
+      expiresAtIso: expiresDate.toISOString(),
       status: 'Activa',
     };
     setMasterKeys((prev) => [record, ...prev]);
+    void syncMasterKeyToSupabase(record);
     handleLogActivity({
       title: `Llave maestra emitida: ${provider} (PIN ${pin})`,
-      subtitle: `${technicianName} · ${scope}`,
+      subtitle: `${technicianName} · ${scope} · Expira ${validUntil} hs`,
       time: nowTime(),
       category: 'admin',
     });
@@ -924,7 +1084,9 @@ export default function App() {
   };
 
   const handlePublishNotice = (notice: Omit<BuildingNotice, 'id'>) => {
-    setNotices((prev) => [{ ...notice, id: `not-${Date.now()}` }, ...prev]);
+    const created: BuildingNotice = { ...notice, id: `not-${Date.now()}` };
+    setNotices((prev) => [created, ...prev]);
+    void syncNoticeToSupabase(activeBuildingId, created);
     handleLogActivity({
       title: `Aviso publicado: ${notice.title}`,
       subtitle: `${notice.showOnIntercom ? 'Cartelera Portero IA' : ''}${
@@ -1045,6 +1207,13 @@ export default function App() {
 
       {activeScreen === 'panel-admin' && (
         <PanelAdminView
+          buildings={buildings}
+          activeBuildingId={activeBuildingId}
+          onChangeActiveBuilding={setActiveBuildingId}
+          currentRole={currentRole}
+          onChangeCurrentRole={setCurrentRole}
+          units={units}
+          onAddUnit={handleAddUnit}
           akuvoxConfig={akuvoxConfig}
           onChangeAkuvoxConfig={setAkuvoxConfig}
           onTestAkuvoxDoorRelay={async () => {
@@ -1056,7 +1225,7 @@ export default function App() {
           masterKeys={masterKeys}
           notices={notices}
           securityAlerts={securityAlerts}
-          activities={activities}
+          accessLogs={accessLogs}
           onAddTenant={handleAddTenant}
           onOffboardTenant={handleOffboardTenant}
           onIssueMasterKey={handleIssueMasterKey}
