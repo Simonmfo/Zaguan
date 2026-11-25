@@ -1,0 +1,493 @@
+<!DOCTYPE html><html lang="es"><head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Zaguán Digital — Portería Virtual y Retrofit Inteligente en Montevideo</title>
+  <script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+  <script id="tailwind-config" data-stitch-original-src="131c988d3c566b56===../../tailwind.config.js">/** @type {import('tailwindcss').Config} */
+globalThis.tailwind = globalThis.tailwind || {};
+globalThis.tailwind.config = {
+  darkMode: 'class',
+  theme: {
+    extend: {
+      colors: {
+        'primary': '#002547',
+        'on-primary': '#FFFFFF',
+        'primary-container': '#103B66',
+        'on-primary-container': '#EAF1FF',
+        'secondary': '#076C41',
+        'on-secondary': '#FFFFFF',
+        'secondary-container': '#D3F7E0',
+        'on-secondary-container': '#00391F',
+        'tertiary': '#3B1D00',
+        'on-tertiary': '#FFFFFF',
+        'tertiary-container': '#5A2F00',
+        'on-tertiary-container': '#FFEEE2',
+        'success': '#076C41',
+        'on-success': '#FFFFFF',
+        'success-container': '#D3F7E0',
+        'on-success-container': '#00391F',
+        'warning': '#9A5B00',
+        'on-warning': '#FFFFFF',
+        'warning-container': '#FFE8C2',
+        'on-warning-container': '#593200',
+        'error': '#BA1A1A',
+        'on-error': '#FFFFFF',
+        'error-container': '#FFDAD6',
+        'on-error-container': '#93000A',
+        'background': '#F7F9FB',
+        'on-background': '#191C1E',
+        'surface': '#F7F9FB',
+        'surface-dim': '#D8DADC',
+        'surface-bright': '#F7F9FB',
+        'surface-container-lowest': '#FFFFFF',
+        'surface-container-low': '#F2F4F6',
+        'surface-container': '#ECEEF0',
+        'surface-container-high': '#E6E8EA',
+        'surface-container-highest': '#E0E3E5',
+        'on-surface': '#191C1E',
+        'surface-variant': '#DFE2EC',
+        'on-surface-variant': '#43474F',
+        'outline': '#737780',
+        'outline-variant': '#C3C6D0',
+        'inverse-surface': '#2D3133',
+        'inverse-on-surface': '#EFF1F3',
+        'inverse-primary': '#A5C9FC',
+      },
+      borderRadius: {
+        'sm': '4px',
+        'DEFAULT': '8px',
+        'md': '12px',
+        'lg': '16px',
+        'xl': '24px',
+        'full': '9999px',
+      },
+      spacing: {
+        'gutter-xs': '4px',
+        'gutter-sm': '8px',
+        'gutter-md': '16px',
+        'gutter-lg': '24px',
+        'gutter-xl': '32px',
+        'section': '48px',
+        'page-margin': '24px',
+      },
+      fontFamily: {
+        'display': ['"Manrope"', 'sans-serif'],
+        'headline': ['"Manrope"', 'sans-serif'],
+        'title': ['"Manrope"', 'sans-serif'],
+        'body': ['"Work Sans"', 'sans-serif'],
+        'label': ['"Work Sans"', 'sans-serif'],
+        'mono': ['"Fira Code"', 'monospace'],
+      },
+      fontSize: {
+        'display-lg': ['48px', { lineHeight: '54px', letterSpacing: '-0.75px', fontWeight: '800' }],
+        'display-lg-mobile': ['32px', { lineHeight: '38px', letterSpacing: '-0.5px', fontWeight: '800' }],
+        'display-md': ['36px', { lineHeight: '42px', letterSpacing: '-0.5px', fontWeight: '700' }],
+        'display-md-mobile': ['28px', { lineHeight: '34px', letterSpacing: '-0.25px', fontWeight: '700' }],
+        'headline-lg': ['34px', { lineHeight: '40px', letterSpacing: '-0.25px', fontWeight: '700' }],
+        'headline-lg-mobile': ['24px', { lineHeight: '30px', letterSpacing: '-0.2px', fontWeight: '700' }],
+        'headline-md': ['24px', { lineHeight: '30px', letterSpacing: '-0.15px', fontWeight: '700' }],
+        'headline-sm': ['20px', { lineHeight: '26px', letterSpacing: '0px', fontWeight: '600' }],
+        'title-lg': ['18px', { lineHeight: '24px', letterSpacing: '0px', fontWeight: '600' }],
+        'title-md': ['16px', { lineHeight: '22px', letterSpacing: '0px', fontWeight: '600' }],
+        'body-lg': ['16px', { lineHeight: '24px', letterSpacing: '0px', fontWeight: '400' }],
+        'body-md': ['14px', { lineHeight: '21px', letterSpacing: '0px', fontWeight: '400' }],
+        'body-sm': ['12px', { lineHeight: '18px', letterSpacing: '0.1px', fontWeight: '400' }],
+        'label-lg': ['14px', { lineHeight: '20px', letterSpacing: '0.1px', fontWeight: '600' }],
+        'label-md': ['12px', { lineHeight: '16px', letterSpacing: '0.2px', fontWeight: '600' }],
+        'label-sm': ['11px', { lineHeight: '14px', letterSpacing: '0.25px', fontWeight: '500' }],
+        'mono-md': ['13px', { lineHeight: '18px', letterSpacing: '0px', fontWeight: '500' }],
+        'mono-sm': ['11px', { lineHeight: '16px', letterSpacing: '0.1px', fontWeight: '500' }],
+      },
+      transitionDuration: {
+        'state-change': '120ms',
+        'surface-enter': '220ms',
+        'surface-exit': '150ms',
+      },
+      transitionDelay: {
+        'state-change': '0ms',
+        'surface-enter': '0ms',
+        'surface-exit': '0ms',
+      },
+      transitionTimingFunction: {
+        'state-change': 'ease-out',
+        'surface-enter': 'cubic-bezier(0.2, 0, 0, 1)',
+        'surface-exit': 'cubic-bezier(0.3, 0, 1, 1)',
+      },
+    },
+  },
+};
+if (typeof module !== 'undefined') module.exports = globalThis.tailwind.config;
+</script>
+  <link href="https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;500&amp;family=Manrope:wght@600;700;800&amp;family=Work+Sans:wght@400;500;600&amp;display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=block" rel="stylesheet">
+  <style>.material-symbols-outlined, .material-symbols-rounded, .material-symbols-sharp, .material-icons { display: inline-block; width: 1em; height: 1em; line-height: 1 !important; box-sizing: content-box; overflow: hidden; white-space: nowrap; direction: ltr; vertical-align: middle; }</style>
+</head>
+<body class="bg-surface text-on-surface font-body antialiased">
+  <div class="min-h-screen flex flex-col">
+
+    <!-- Top Navigation -->
+    <header class="sticky top-0 z-30 bg-surface border-b border-outline-variant">
+      <div class="max-w-[1200px] mx-auto px-page-margin h-16 flex items-center justify-between gap-gutter-lg">
+        <a href="#inicio" class="flex items-center gap-2.5 text-on-surface">
+          <svg viewBox="0 0 36 36" class="w-9 h-9 shrink-0" aria-hidden="true">
+            <path d="M18 2L5 7.5v9.8c0 8.2 5.5 15.2 13 17.7 7.5-2.5 13-9.5 13-17.7V7.5L18 2z" class="fill-primary"></path>
+            <path d="M13 26V16.5a5 5 0 0 1 10 0V26" fill="none" class="stroke-on-primary" stroke-width="2.2" stroke-linecap="round"></path>
+            <circle cx="18" cy="18.5" r="2.2" class="fill-secondary-container"></circle>
+          </svg>
+          <span class="font-headline text-title-lg tracking-tight">Zaguán Digital</span>
+        </a>
+
+        <nav aria-label="Navegación principal" class="hidden md:flex items-center gap-gutter-xl">
+          <a href="#retrofit" class="font-label text-label-lg text-on-surface-variant hover:text-primary transition-colors duration-state-change">Solución Retrofit</a>
+          <a href="#app" class="font-label text-label-lg text-on-surface-variant hover:text-primary transition-colors duration-state-change">App Residente</a>
+          <a href="#legal" class="font-label text-label-lg text-on-surface-variant hover:text-primary transition-colors duration-state-change">Marco Legal</a>
+          <a href="#comparativa" class="font-label text-label-lg text-on-surface-variant hover:text-primary transition-colors duration-state-change">Estándares y SLA</a>
+        </nav>
+
+        <div class="flex items-center gap-gutter-sm">
+          <!-- COMPONENT: button-primary -->
+          <button data-component-id="button-primary" data-component-type="button" data-component-variant="primary" type="button" onclick="document.getElementById(&#39;retrofit&#39;).scrollIntoView({behavior:&#39;smooth&#39;})" class="inline-flex items-center justify-center gap-2 px-5 py-2.5 rounded bg-primary text-on-primary hover:bg-primary-container focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary transition-colors duration-state-change ease-state-change">
+            <span class="font-label text-label-lg" data-design-text-token="label-lg">Cotizar</span>
+          </button>
+        </div>
+      </div>
+    </header>
+
+    <main id="inicio" class="flex-1">
+
+      <!-- Hero Split Section -->
+      <section class="py-section border-b border-outline-variant">
+        <div class="max-w-[1200px] mx-auto px-page-margin grid grid-cols-1 lg:grid-cols-12 gap-gutter-xl items-center">
+          <div class="lg:col-span-6 flex flex-col items-start gap-gutter-lg">
+            <!-- COMPONENT: badge-success -->
+            <span data-component-id="badge-success" data-component-type="badge" data-component-variant="success" role="status" class="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-success-container text-on-success-container">
+              <span class="w-1.5 h-1.5 rounded-full bg-success" aria-hidden="true"></span>
+              <span class="font-label text-label-sm" data-design-text-token="label-sm">Habilitación DI.GE.F.E. Vigente · Ley 19.721</span>
+            </span>
+
+            <h1 class="font-display text-display-lg-mobile lg:text-display-lg text-on-surface text-balance">
+              Portería virtual sin recablear tu edificio.
+            </h1>
+
+            <p class="font-body text-body-lg text-on-surface-variant max-w-prose text-pretty">
+              Conectamos los porteros Bellsonic, Commax o Fermax existentes a nuestra sala de monitoreo 24/7 en Montevideo y a la app de cada residente. Sin obras en apartamentos, sin comodatos opacos y con apertura de portón y QR por WhatsApp.
+            </p>
+
+            <div class="flex flex-wrap items-center gap-gutter-md pt-1">
+              <!-- COMPONENT: button-with-icon -->
+              <button data-component-id="button-with-icon" data-component-type="button" data-component-variant="with-icon" type="button" onclick="document.getElementById(&#39;retrofit&#39;).scrollIntoView({behavior:&#39;smooth&#39;})" class="inline-flex items-center justify-center gap-2 px-5 py-3 rounded bg-primary text-on-primary hover:bg-primary-container focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary transition-colors duration-state-change">
+                <span class="material-symbols-outlined text-title-lg" aria-hidden="true">calculate</span>
+                <span class="font-label text-label-lg" data-design-text-token="label-lg">Calcular ahorro de obra</span>
+              </button>
+
+              <!-- COMPONENT: button-secondary -->
+              <button data-component-id="button-secondary" data-component-type="button" data-component-variant="secondary" type="button" onclick="document.getElementById(&#39;comparativa&#39;).scrollIntoView({behavior:&#39;smooth&#39;})" class="inline-flex items-center justify-center gap-2 px-5 py-3 rounded bg-surface-container-lowest text-secondary border border-outline-variant hover:bg-surface-container-low focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-secondary transition-colors duration-state-change">
+                <span class="font-label text-label-lg" data-design-text-token="label-lg">Ver comparativa SLA</span>
+              </button>
+            </div>
+
+            <div class="grid grid-cols-3 gap-gutter-lg pt-4 border-t border-outline-variant w-full">
+              <div class="flex flex-col">
+                <span class="font-headline text-headline-md text-on-surface tabular-nums">99.8%</span>
+                <span class="font-body text-body-sm text-on-surface-variant">SLA firmado por contrato</span>
+              </div>
+              <div class="flex flex-col">
+                <span class="font-headline text-headline-md text-on-surface tabular-nums">48 hs</span>
+                <span class="font-body text-body-sm text-on-surface-variant">Instalación retrofit</span>
+              </div>
+              <div class="flex flex-col">
+                <span class="font-headline text-headline-md text-primary tabular-nums">-65%</span>
+                <span class="font-body text-body-sm text-on-surface-variant">Costo vs. guardia física</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="lg:col-span-6 flex flex-col gap-gutter-md">
+            <div class="relative rounded-md overflow-hidden border border-outline-variant bg-surface-container-low">
+              <img src="https://lh3.googleusercontent.com/aida/ALJJyrBtBvRYV0OdgVM72yTLAjA8T7ezTb5tkQgP03bZqWEX-pY2X-Xr9snxbL1iLkq6emjR_e9wQ1o5MyHGarb6a9E0rRrr_vf_RJ11s3lS9A_b9lkp03KhPtUkqkAsYZNco1ZMFUPfgbRguJgWq-IsCdhcxDdcSMz4SHAYqDiJcOUJ1f4N2SkiMN9LuNbTnDMIcY6-5_6VReKuzFrE8XMCcn8ycKAhzdn3oXFp1swlE4zX7EMCgakdgTBCUFhdhXusYsk4uA" alt="Frente de edificio residencial en Montevideo con panel IP compacto" class="w-full h-[380px] object-cover" data-stitch-original-src="ff430b3071f03004===../../images/hero_edificio_montevideo.jpg">
+              <div class="p-4 bg-surface-container-lowest border-t border-outline-variant flex flex-wrap items-center justify-between gap-2">
+                <div class="flex items-center gap-2">
+                  <span class="material-symbols-outlined text-secondary text-title-lg" aria-hidden="true">videocam</span>
+                  <span class="font-label text-label-md text-on-surface">Hikvision AcuSense &amp; ColorVu + Estándar ONVIF/SIP</span>
+                </div>
+                <span class="font-mono text-mono-sm text-secondary bg-secondary-container px-2 py-0.5 rounded-sm">SIN COMODATO</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- 4 Pillars Section -->
+      <section id="app" class="py-section bg-surface-container-low border-b border-outline-variant">
+        <div class="max-w-[1200px] mx-auto px-page-margin flex flex-col gap-gutter-xl">
+          <div class="flex flex-col gap-2 max-w-2xl">
+            <h2 class="font-display text-display-md-mobile lg:text-display-md text-on-surface">
+              Diseñado para resolver los cuellos de botella reales de Montevideo
+            </h2>
+            <p class="font-body text-body-lg text-on-surface-variant text-pretty">
+              Superamos las limitaciones de la portería virtual tradicional combinando hardware compatible, experiencia móvil sin fricción y transparencia jurídica.
+            </p>
+          </div>
+
+          <div class="grid grid-cols-1 md:grid-cols-2 gap-gutter-lg items-stretch">
+            <!-- COMPONENT: card-elevated -->
+            <article data-component-id="card-elevated" data-component-type="card" data-component-variant="elevated" class="bg-surface-container-lowest border border-outline-variant rounded-md p-6 flex flex-col gap-3 h-full">
+              <header class="flex items-center gap-3">
+                <span class="w-10 h-10 rounded bg-surface-variant text-primary inline-flex items-center justify-center shrink-0">
+                  <span class="material-symbols-outlined" aria-hidden="true">cable</span>
+                </span>
+                <div>
+                  <h3 class="font-title text-title-lg text-on-surface" data-design-text-token="title-lg">Módulo Retrofit Universal (Zero-Obra)</h3>
+                  <p class="font-body text-body-sm text-on-surface-variant" data-design-text-token="body-sm">Bellsonic · Commax · Fermax · Intelbras</p>
+                </div>
+              </header>
+              <div>
+                <p class="font-body text-body-md text-on-surface-variant text-pretty" data-design-text-token="body-md">
+                  Adaptador híbrido IP/SIP conectado al frente de calle y pestillo eléctrico existente. Evita cambiar el cableado vertical o los teléfonos internos en edificios de 1980 a 2010.
+                </p>
+              </div>
+            </article>
+
+            <!-- COMPONENT: card-elevated -->
+            <article data-component-id="card-elevated" data-component-type="card" data-component-variant="elevated" class="bg-surface-container-lowest border border-outline-variant rounded-md p-6 flex flex-col gap-3 h-full">
+              <header class="flex items-center gap-3">
+                <span class="w-10 h-10 rounded bg-secondary-container text-on-secondary-container inline-flex items-center justify-center shrink-0">
+                  <span class="material-symbols-outlined" aria-hidden="true">qr_code_2</span>
+                </span>
+                <div>
+                  <h3 class="font-title text-title-lg text-on-surface" data-design-text-token="title-lg">App-First: Portón, QR WhatsApp y Paquetería</h3>
+                  <p class="font-body text-body-sm text-on-surface-variant" data-design-text-token="body-sm">Sin depender de enviar mensajes al operador</p>
+                </div>
+              </header>
+              <div>
+                <p class="font-body text-body-md text-on-surface-variant text-pretty" data-design-text-token="body-md">
+                  Abrí la puerta principal o el portón del garaje directo desde el celular, generá pases QR temporales por WhatsApp para PedidosYa o MercadoLibre y recibí foto al llegar una encomienda.
+                </p>
+              </div>
+            </article>
+
+            <!-- COMPONENT: card-elevated -->
+            <article data-component-id="card-elevated" data-component-type="card" data-component-variant="elevated" class="bg-surface-container-lowest border border-outline-variant rounded-md p-6 flex flex-col gap-3 h-full">
+              <header class="flex items-center gap-3">
+                <span class="w-10 h-10 rounded bg-surface-variant text-primary inline-flex items-center justify-center shrink-0">
+                  <span class="material-symbols-outlined" aria-hidden="true">tablet_mac</span>
+                </span>
+                <div>
+                  <h3 class="font-title text-title-lg text-on-surface" data-design-text-token="title-lg">Hardware Flexible sin Tótem Obligatorio</h3>
+                  <p class="font-body text-body-sm text-on-surface-variant" data-design-text-token="body-sm">Frente IP compacto o tótem ligero opcional</p>
+                </div>
+              </header>
+              <div>
+                <p class="font-body text-body-md text-on-surface-variant text-pretty" data-design-text-token="body-md">
+                  En halls reducidos de Pocitos, Cordón o Centro no imponemos tótems masivos ni costosos. Desplegamos frentes IP estilizados con audio bidireccional y cámara nocturna ColorVu.
+                </p>
+              </div>
+            </article>
+
+            <!-- COMPONENT: card-elevated -->
+            <article data-component-id="card-elevated" data-component-type="card" data-component-variant="elevated" class="bg-surface-container-lowest border border-outline-variant rounded-md p-6 flex flex-col gap-3 h-full">
+              <header class="flex items-center gap-3">
+                <span class="w-10 h-10 rounded bg-secondary-container text-on-secondary-container inline-flex items-center justify-center shrink-0">
+                  <span class="material-symbols-outlined" aria-hidden="true">lock_open</span>
+                </span>
+                <div>
+                  <h3 class="font-title text-title-lg text-on-surface" data-design-text-token="title-lg">Propiedad del Equipo y Estándares Abiertos</h3>
+                  <p class="font-body text-body-sm text-on-surface-variant" data-design-text-token="body-sm">Protocolos ONVIF / SIP · Cero bloqueo</p>
+                </div>
+              </header>
+              <div>
+                <p class="font-body text-body-md text-on-surface-variant text-pretty" data-design-text-token="body-md">
+                  Eliminamos el comodato que hace perder la inversión al rescindir. Las cámaras y gateways quedan en propiedad del consorcio con estándares abiertos y SLA escrito.
+                </p>
+              </div>
+            </article>
+          </div>
+        </div>
+      </section>
+
+      <!-- Interactive Retrofit Capex Estimator -->
+      <section id="retrofit" class="py-section border-b border-outline-variant">
+        <div class="max-w-[1200px] mx-auto px-page-margin grid grid-cols-1 lg:grid-cols-12 gap-gutter-xl items-start">
+          <div class="lg:col-span-5 flex flex-col gap-gutter-md">
+            <h2 class="font-display text-display-md-mobile lg:text-display-md text-on-surface">
+              Estimador de ahorro en Retrofit
+            </h2>
+            <p class="font-body text-body-lg text-on-surface-variant text-pretty">
+              Seleccioná el sistema actual de tu edificio para comparar la inversión inicial (Capex) frente a un recableado IP completo.
+            </p>
+            <div class="p-4 rounded-md bg-surface-container-low border border-outline-variant flex items-start gap-3">
+              <span class="material-symbols-outlined text-secondary mt-0.5" aria-hidden="true">architecture</span>
+              <p class="font-body text-body-md text-on-surface-variant">
+                <strong class="text-on-surface font-semibold">Convenio Estudios y SAU:</strong> 15% de bonificación en equipamiento e instalación, más videovigilancia de obrador sin costo en obra nueva.
+              </p>
+            </div>
+          </div>
+
+          <div class="lg:col-span-7 bg-surface-container-lowest border border-outline-variant rounded-md p-6 flex flex-col gap-gutter-lg">
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-gutter-md">
+              <div class="flex flex-col gap-2">
+                <label for="brand-select" class="font-label text-label-md text-on-surface">Portero eléctrico instalado</label>
+                <select id="brand-select" onchange="updateEstimate()" class="rounded border-outline-variant bg-surface text-on-surface font-body text-body-md focus:border-primary focus:ring-primary">
+                  <option value="bellsonic">Bellsonic Analógico (4+n / 2 hilos)</option>
+                  <option value="commax">Commax / Golmar Multihilo</option>
+                  <option value="fermax">Fermax VDS / MDS</option>
+                  <option value="nuevo">Obra nueva / Sin cableado previo</option>
+                </select>
+              </div>
+              <div class="flex flex-col gap-2">
+                <label for="units-select" class="font-label text-label-md text-on-surface">Cantidad de unidades</label>
+                <select id="units-select" onchange="updateEstimate()" class="rounded border-outline-variant bg-surface text-on-surface font-body text-body-md focus:border-primary focus:ring-primary">
+                  <option value="12">12 apartamentos</option>
+                  <option value="24" selected>24 apartamentos</option>
+                  <option value="48">48 apartamentos</option>
+                </select>
+              </div>
+            </div>
+
+            <div class="grid grid-cols-1 sm:grid-cols-3 gap-gutter-md p-4 rounded bg-surface-container-low border border-outline-variant">
+              <div class="flex flex-col gap-1">
+                <span class="font-label text-label-sm text-on-surface-variant">Recableado IP tradicional</span>
+                <span id="est-traditional" class="font-headline text-headline-md text-on-surface-variant line-through tabular-nums">USD 7.400</span>
+              </div>
+              <div class="flex flex-col gap-1">
+                <span class="font-label text-label-sm text-primary">Con Gateway Zaguán</span>
+                <span id="est-zaguan" class="font-headline text-headline-md text-primary tabular-nums">USD 1.450</span>
+              </div>
+              <div class="flex flex-col gap-1">
+                <span class="font-label text-label-sm text-success">Ahorro estimado Capex</span>
+                <span id="est-savings" class="font-headline text-headline-md text-success tabular-nums">80%</span>
+              </div>
+            </div>
+
+            <div class="flex flex-wrap items-center justify-between gap-4">
+              <span id="est-note" class="font-mono text-mono-sm text-secondary">Protocolo: Gateway SIP/Relé sobre bus 4+n · Cero obra en deptos</span>
+              <button type="button" class="px-5 py-2.5 rounded bg-primary text-on-primary font-label text-label-lg hover:bg-primary-container transition-colors duration-state-change">
+                Agendar visita técnica sin costo
+              </button>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Legal Compliance & Competitive Comparison -->
+      <section id="legal" class="py-section bg-surface-container-low border-b border-outline-variant">
+        <div class="max-w-[1200px] mx-auto px-page-margin flex flex-col gap-gutter-xl">
+          <div class="grid grid-cols-1 lg:grid-cols-2 gap-gutter-lg">
+            <div class="bg-surface-container-lowest border border-outline-variant rounded-md p-6 flex flex-col gap-3">
+              <div class="flex items-center justify-between">
+                <span class="font-mono text-mono-sm text-secondary bg-secondary-container px-2.5 py-1 rounded-sm">LEY 19.721 · DECRETO 35/022</span>
+                <span class="material-symbols-outlined text-secondary" aria-hidden="true">verified_user</span>
+              </div>
+              <h3 class="font-headline text-headline-sm text-on-surface">Habilitación DI.GE.F.E. Vigente</h3>
+              <p class="font-body text-body-md text-on-surface-variant text-pretty">
+                Toda empresa que preste monitoreo electrónico o guardia física en Uruguay debe contar con habilitación oficial del Ministerio del Interior renovable cada 3 años. Zaguán Digital opera bajo registro vigente auditable.
+              </p>
+            </div>
+
+            <div class="bg-surface-container-lowest border border-outline-variant rounded-md p-6 flex flex-col gap-3">
+              <div class="flex items-center justify-between">
+                <span class="font-mono text-mono-sm text-primary bg-surface-variant px-2.5 py-1 rounded-sm">LEY 18.251 · TERCERIZACIÓN</span>
+                <span class="material-symbols-outlined text-primary" aria-hidden="true">gavel</span>
+              </div>
+              <h3 class="font-headline text-headline-sm text-on-surface">Protección Laboral para Consorcios</h3>
+              <p class="font-body text-body-md text-on-surface-variant text-pretty">
+                Entregamos automáticamente cada mes recibos de sueldo, aportes al BPS, certificados de DGI y póliza del BSE para que el consorcio mantenga responsabilidad subsidiaria y evite contingencias solidarias.
+              </p>
+            </div>
+          </div>
+
+          <div id="comparativa" class="bg-surface-container-lowest border border-outline-variant rounded-md overflow-hidden">
+            <div class="p-6 border-b border-outline-variant flex flex-wrap items-center justify-between gap-4">
+              <div>
+                <h3 class="font-headline text-headline-sm text-on-surface">Comparativa de Modelos en Montevideo</h3>
+                <p class="font-body text-body-sm text-on-surface-variant">Transparencia operativa frente a portería presencial y esquemas tradicionales</p>
+              </div>
+              <span class="font-mono text-mono-sm text-secondary">SLA Monitoreo: &lt; 4 seg</span>
+            </div>
+            <div class="overflow-x-auto">
+              <table class="w-full text-left border-collapse">
+                <thead>
+                  <tr class="bg-surface-container-low border-b border-outline-variant">
+                    <th class="py-3.5 px-6 font-label text-label-md text-on-surface">Dimensión</th>
+                    <th class="py-3.5 px-6 font-label text-label-md text-primary">Zaguán Digital</th>
+                    <th class="py-3.5 px-6 font-label text-label-md text-on-surface-variant">Portería Virtual Tradicional</th>
+                    <th class="py-3.5 px-6 font-label text-label-md text-on-surface-variant">Guardia Presencial 24 hs</th>
+                  </tr>
+                </thead>
+                <tbody class="divide-y divide-outline-variant font-body text-body-md">
+                  <tr>
+                    <td class="py-3.5 px-6 font-medium text-on-surface">Infraestructura previa</td>
+                    <td class="py-3.5 px-6 text-on-surface">Retrofit Bellsonic / Commax / Fermax</td>
+                    <td class="py-3.5 px-6 text-on-surface-variant">Requiere recableado IP o tótem grande</td>
+                    <td class="py-3.5 px-6 text-on-surface-variant">Sin integración digital nativa</td>
+                  </tr>
+                  <tr>
+                    <td class="py-3.5 px-6 font-medium text-on-surface">Propiedad del hardware</td>
+                    <td class="py-3.5 px-6 text-success font-medium">100% del consorcio (ONVIF/SIP)</td>
+                    <td class="py-3.5 px-6 text-on-surface-variant">Comodato con retención de equipo</td>
+                    <td class="py-3.5 px-6 text-on-surface-variant">No aplica</td>
+                  </tr>
+                  <tr>
+                    <td class="py-3.5 px-6 font-medium text-on-surface">App residente</td>
+                    <td class="py-3.5 px-6 text-on-surface">Portón garaje, QR WhatsApp, foto paquete</td>
+                    <td class="py-3.5 px-6 text-on-surface-variant">Frecuente desvío manual por WhatsApp</td>
+                    <td class="py-3.5 px-6 text-on-surface-variant">Atención manual en mostrador</td>
+                  </tr>
+                  <tr>
+                    <td class="py-3.5 px-6 font-medium text-on-surface">Documentación Ley 18.251</td>
+                    <td class="py-3.5 px-6 text-on-surface">Portal mensual BPS / DGI / BSE automático</td>
+                    <td class="py-3.5 px-6 text-on-surface-variant">Envío bajo solicitud</td>
+                    <td class="py-3.5 px-6 text-on-surface-variant">Auditoría mensual crítica (3+ turnos)</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      </section>
+
+    </main>
+
+    <!-- Footer -->
+    <footer class="bg-surface border-t border-outline-variant py-8">
+      <div class="max-w-[1200px] mx-auto px-page-margin flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+        <div class="flex flex-col gap-1">
+          <span class="font-headline text-title-md text-on-surface">Zaguán Digital · Montevideo, Uruguay</span>
+          <span class="font-body text-body-sm text-on-surface-variant">Pocitos · Cordón · Centro · Habilitación DI.GE.F.E. vigente</span>
+        </div>
+        <div class="flex flex-wrap items-center gap-6 font-mono text-mono-sm text-on-surface-variant">
+          <span>Emergencias 24/7: 2713 3000</span>
+          <span>WhatsApp: +598 97 999 561</span>
+        </div>
+      </div>
+    </footer>
+
+  </div>
+
+  <script>
+    function updateEstimate() {
+      const brand = document.getElementById('brand-select').value;
+      const units = parseInt(document.getElementById('units-select').value, 10);
+      const trad = units * 310;
+      let zaguan = 1450;
+      let note = 'Protocolo: Gateway SIP/Relé sobre bus 4+n · Cero obra en deptos';
+      if (brand === 'commax') {
+        zaguan = 1520;
+        note = 'Protocolo: Interfaz multihilo Commax/Golmar · Cero obra en deptos';
+      } else if (brand === 'fermax') {
+        zaguan = 1600;
+        note = 'Protocolo: Módulo adaptador Fermax VDS/MDS · Cero obra en deptos';
+      } else if (brand === 'nuevo') {
+        zaguan = Math.round(units * 145);
+        note = 'Protocolo: Frente IP compacto App-First (sin monitores internos)';
+      }
+      const savings = Math.round(((trad - zaguan) / trad) * 100);
+      document.getElementById('est-traditional').textContent = 'USD ' + trad.toLocaleString('es-UY');
+      document.getElementById('est-zaguan').textContent = 'USD ' + zaguan.toLocaleString('es-UY');
+      document.getElementById('est-savings').textContent = savings + '%';
+      document.getElementById('est-note').textContent = note;
+    }
+  </script>
+
+
+</body></html>

@@ -1,0 +1,402 @@
+<!DOCTYPE html><html lang="es"><head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Zaguán Digital — Módulo de Conversión y Retrofit para Edificios Antiguos</title>
+  <script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+  <script id="tailwind-config" data-stitch-original-src="131c988d3c566b56===../../tailwind.config.js">/** @type {import('tailwindcss').Config} */
+globalThis.tailwind = globalThis.tailwind || {};
+globalThis.tailwind.config = {
+  darkMode: 'class',
+  theme: {
+    extend: {
+      colors: {
+        'primary': '#002547',
+        'on-primary': '#FFFFFF',
+        'primary-container': '#103B66',
+        'on-primary-container': '#EAF1FF',
+        'secondary': '#076C41',
+        'on-secondary': '#FFFFFF',
+        'secondary-container': '#D3F7E0',
+        'on-secondary-container': '#00391F',
+        'tertiary': '#3B1D00',
+        'on-tertiary': '#FFFFFF',
+        'tertiary-container': '#5A2F00',
+        'on-tertiary-container': '#FFEEE2',
+        'success': '#076C41',
+        'on-success': '#FFFFFF',
+        'success-container': '#D3F7E0',
+        'on-success-container': '#00391F',
+        'warning': '#9A5B00',
+        'on-warning': '#FFFFFF',
+        'warning-container': '#FFE8C2',
+        'on-warning-container': '#593200',
+        'error': '#BA1A1A',
+        'on-error': '#FFFFFF',
+        'error-container': '#FFDAD6',
+        'on-error-container': '#93000A',
+        'background': '#F7F9FB',
+        'on-background': '#191C1E',
+        'surface': '#F7F9FB',
+        'surface-dim': '#D8DADC',
+        'surface-bright': '#F7F9FB',
+        'surface-container-lowest': '#FFFFFF',
+        'surface-container-low': '#F2F4F6',
+        'surface-container': '#ECEEF0',
+        'surface-container-high': '#E6E8EA',
+        'surface-container-highest': '#E0E3E5',
+        'on-surface': '#191C1E',
+        'surface-variant': '#DFE2EC',
+        'on-surface-variant': '#43474F',
+        'outline': '#737780',
+        'outline-variant': '#C3C6D0',
+        'inverse-surface': '#2D3133',
+        'inverse-on-surface': '#EFF1F3',
+        'inverse-primary': '#A5C9FC',
+      },
+      borderRadius: {
+        'sm': '4px',
+        'DEFAULT': '8px',
+        'md': '12px',
+        'lg': '16px',
+        'xl': '24px',
+        'full': '9999px',
+      },
+      spacing: {
+        'gutter-xs': '4px',
+        'gutter-sm': '8px',
+        'gutter-md': '16px',
+        'gutter-lg': '24px',
+        'gutter-xl': '32px',
+        'section': '48px',
+        'page-margin': '24px',
+      },
+      fontFamily: {
+        'display': ['"Manrope"', 'sans-serif'],
+        'headline': ['"Manrope"', 'sans-serif'],
+        'title': ['"Manrope"', 'sans-serif'],
+        'body': ['"Work Sans"', 'sans-serif'],
+        'label': ['"Work Sans"', 'sans-serif'],
+        'mono': ['"Fira Code"', 'monospace'],
+      },
+      fontSize: {
+        'display-lg': ['48px', { lineHeight: '54px', letterSpacing: '-0.75px', fontWeight: '800' }],
+        'display-lg-mobile': ['32px', { lineHeight: '38px', letterSpacing: '-0.5px', fontWeight: '800' }],
+        'display-md': ['36px', { lineHeight: '42px', letterSpacing: '-0.5px', fontWeight: '700' }],
+        'display-md-mobile': ['28px', { lineHeight: '34px', letterSpacing: '-0.25px', fontWeight: '700' }],
+        'headline-lg': ['34px', { lineHeight: '40px', letterSpacing: '-0.25px', fontWeight: '700' }],
+        'headline-lg-mobile': ['24px', { lineHeight: '30px', letterSpacing: '-0.2px', fontWeight: '700' }],
+        'headline-md': ['24px', { lineHeight: '30px', letterSpacing: '-0.15px', fontWeight: '700' }],
+        'headline-sm': ['20px', { lineHeight: '26px', letterSpacing: '0px', fontWeight: '600' }],
+        'title-lg': ['18px', { lineHeight: '24px', letterSpacing: '0px', fontWeight: '600' }],
+        'title-md': ['16px', { lineHeight: '22px', letterSpacing: '0px', fontWeight: '600' }],
+        'body-lg': ['16px', { lineHeight: '24px', letterSpacing: '0px', fontWeight: '400' }],
+        'body-md': ['14px', { lineHeight: '21px', letterSpacing: '0px', fontWeight: '400' }],
+        'body-sm': ['12px', { lineHeight: '18px', letterSpacing: '0.1px', fontWeight: '400' }],
+        'label-lg': ['14px', { lineHeight: '20px', letterSpacing: '0.1px', fontWeight: '600' }],
+        'label-md': ['12px', { lineHeight: '16px', letterSpacing: '0.2px', fontWeight: '600' }],
+        'label-sm': ['11px', { lineHeight: '14px', letterSpacing: '0.25px', fontWeight: '500' }],
+        'mono-md': ['13px', { lineHeight: '18px', letterSpacing: '0px', fontWeight: '500' }],
+        'mono-sm': ['11px', { lineHeight: '16px', letterSpacing: '0.1px', fontWeight: '500' }],
+      },
+      transitionDuration: {
+        'state-change': '120ms',
+        'surface-enter': '220ms',
+        'surface-exit': '150ms',
+      },
+      transitionDelay: {
+        'state-change': '0ms',
+        'surface-enter': '0ms',
+        'surface-exit': '0ms',
+      },
+      transitionTimingFunction: {
+        'state-change': 'ease-out',
+        'surface-enter': 'cubic-bezier(0.2, 0, 0, 1)',
+        'surface-exit': 'cubic-bezier(0.3, 0, 1, 1)',
+      },
+    },
+  },
+};
+if (typeof module !== 'undefined') module.exports = globalThis.tailwind.config;
+</script>
+  <link href="https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;500&amp;family=Manrope:wght@600;700;800&amp;family=Work+Sans:wght@400;500;600&amp;display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=block" rel="stylesheet">
+  <style>.material-symbols-outlined, .material-symbols-rounded, .material-symbols-sharp, .material-icons { display: inline-block; width: 1em; height: 1em; line-height: 1 !important; box-sizing: content-box; overflow: hidden; white-space: nowrap; direction: ltr; vertical-align: middle; }</style>
+</head>
+<body class="bg-surface text-on-surface font-body antialiased">
+  <div class="min-h-screen flex flex-col">
+
+    <!-- Top Navigation (exact shell parity with ZaguanWebInicio) -->
+    <header class="sticky top-0 z-30 bg-surface border-b border-outline-variant">
+      <div class="max-w-[1200px] mx-auto px-page-margin h-16 flex items-center justify-between gap-gutter-lg">
+        <a href="../web-inicio/ZaguanWebInicio.html" class="flex items-center gap-2.5 text-on-surface">
+          <svg viewBox="0 0 36 36" class="w-9 h-9 shrink-0" aria-hidden="true">
+            <path d="M18 2L5 7.5v9.8c0 8.2 5.5 15.2 13 17.7 7.5-2.5 13-9.5 13-17.7V7.5L18 2z" class="fill-primary"></path>
+            <path d="M13 26V16.5a5 5 0 0 1 10 0V26" fill="none" class="stroke-on-primary" stroke-width="2.2" stroke-linecap="round"></path>
+            <circle cx="18" cy="18.5" r="2.2" class="fill-secondary-container"></circle>
+          </svg>
+          <span class="font-headline text-title-lg tracking-tight">Zaguán Digital</span>
+        </a>
+
+        <nav aria-label="Navegación principal" class="hidden md:flex items-center gap-gutter-xl">
+          <a href="#retrofit-hero" class="font-label text-label-lg text-primary font-semibold transition-colors duration-state-change">Solución Retrofit</a>
+          <a href="../web-inicio/ZaguanWebInicio.html#app" class="font-label text-label-lg text-on-surface-variant hover:text-primary transition-colors duration-state-change">App Residente</a>
+          <a href="../web-inicio/ZaguanWebInicio.html#legal" class="font-label text-label-lg text-on-surface-variant hover:text-primary transition-colors duration-state-change">Marco Legal</a>
+          <a href="../web-inicio/ZaguanWebInicio.html#comparativa" class="font-label text-label-lg text-on-surface-variant hover:text-primary transition-colors duration-state-change">Estándares y SLA</a>
+        </nav>
+
+        <div class="flex items-center gap-gutter-sm">
+          <!-- COMPONENT: button-primary -->
+          <button data-component-id="button-primary" data-component-type="button" data-component-variant="primary" type="button" onclick="document.getElementById(&#39;relevamiento&#39;).scrollIntoView({behavior:&#39;smooth&#39;})" class="inline-flex items-center justify-center gap-2 px-5 py-2.5 rounded bg-primary text-on-primary hover:bg-primary-container focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary transition-colors duration-state-change ease-state-change">
+            <span class="font-label text-label-lg" data-design-text-token="label-lg">Cotizar</span>
+          </button>
+        </div>
+      </div>
+    </header>
+
+    <main id="retrofit-hero" class="flex-1">
+
+      <!-- Retrofit Hero -->
+      <section class="py-section border-b border-outline-variant">
+        <div class="max-w-[1200px] mx-auto px-page-margin grid grid-cols-1 lg:grid-cols-12 gap-gutter-xl items-center">
+          <div class="lg:col-span-6 flex flex-col items-start gap-gutter-lg">
+            <!-- COMPONENT: badge-success -->
+            <span data-component-id="badge-success" data-component-type="badge" data-component-variant="success" role="status" class="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-success-container text-on-success-container">
+              <span class="w-1.5 h-1.5 rounded-full bg-success" aria-hidden="true"></span>
+              <span class="font-label text-label-sm" data-design-text-token="label-sm">Retrofit Plug &amp; Play · Cero obra en apartamentos</span>
+            </span>
+
+            <h1 class="font-display text-display-lg-mobile lg:text-display-lg text-on-surface text-balance">
+              Convertí tu portero antiguo a portería virtual en 48 horas.
+            </h1>
+
+            <p class="font-body text-body-lg text-on-surface-variant max-w-prose text-pretty">
+              La mayoría de los edificios de Montevideo construidos entre 1980 y 2010 usan cableados analógicos Bellsonic, Commax o Fermax. Nuestro Gateway Híbrido IP/SIP se conecta directo al frente de calle y al pestillo eléctrico sin tocar los teléfonos internos.
+            </p>
+
+            <div class="flex flex-wrap items-center gap-gutter-md">
+              <!-- COMPONENT: button-with-icon -->
+              <button data-component-id="button-with-icon" data-component-type="button" data-component-variant="with-icon" type="button" onclick="document.getElementById(&#39;matriz-marcas&#39;).scrollIntoView({behavior:&#39;smooth&#39;})" class="inline-flex items-center justify-center gap-2 px-5 py-3 rounded bg-primary text-on-primary hover:bg-primary-container transition-colors duration-state-change">
+                <span class="material-symbols-outlined text-title-lg" aria-hidden="true">hub</span>
+                <span class="font-label text-label-lg" data-design-text-token="label-lg">Ver matriz de marcas</span>
+              </button>
+
+              <!-- COMPONENT: button-secondary -->
+              <button data-component-id="button-secondary" data-component-type="button" data-component-variant="secondary" type="button" onclick="document.getElementById(&#39;relevamiento&#39;).scrollIntoView({behavior:&#39;smooth&#39;})" class="inline-flex items-center justify-center gap-2 px-5 py-3 rounded bg-surface-container-lowest text-secondary border border-outline-variant hover:bg-surface-container-low transition-colors duration-state-change">
+                <span class="font-label text-label-lg" data-design-text-token="label-lg">Agendar relevamiento</span>
+              </button>
+            </div>
+          </div>
+
+          <div class="lg:col-span-6">
+            <div class="rounded-md overflow-hidden border border-outline-variant bg-surface-container-low">
+              <img src="https://lh3.googleusercontent.com/aida/ALJJyrC4cLamy-gSkSXyHktR6UJU-vYfboVhDJB6u62Nft6Xak5B_86M2VsfbZu5X6zRch6jpFAutJqhcve6MVjxpVyIyNm5YiwLEWmuITaPrvljpQ55ET6oIVZOZt6EAxxgqmDXLI-RJTvRfFS8IvAHOtR5WzWyWbv62bAk96tnYksecJV4vvKMS993IgE4UUS3MBAr5aNmm8swBK6Y89xCrPkNaYJOoiPpW2vxiRIkNR_iO1PFHxFJYYBpEe7bEls0c0Rqf_-K" alt="Módulo Gateway Híbrido IP/SIP conectado a bornera de portero analógico" class="w-full h-[360px] object-cover" data-stitch-original-src="4186e54d9932947b===../../images/retrofit_modulo_bellsonic.jpg">
+              <div class="p-4 bg-surface-container-lowest border-t border-outline-variant flex flex-wrap items-center justify-between gap-2">
+                <span class="font-mono text-mono-sm text-secondary">Interfaz: Relé IP/SIP + Bus 4+n / 2 hilos</span>
+                <span class="font-label text-label-md text-on-surface">Estándar abierto ONVIF / SIP</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Interactive Brand Compatibility Matrix -->
+      <section id="matriz-marcas" class="py-section bg-surface-container-low border-b border-outline-variant">
+        <div class="max-w-[1200px] mx-auto px-page-margin flex flex-col gap-gutter-xl">
+          <div class="flex flex-col gap-2 max-w-2xl">
+            <h2 class="font-display text-display-md-mobile lg:text-display-md text-on-surface">
+              Compatibilidad con porteros instalados en Montevideo
+            </h2>
+            <p class="font-body text-body-lg text-on-surface-variant text-pretty">
+              Seleccioná la marca actual del frente de calle para ver el esquema de adaptación y qué infraestructura se conserva intacta.
+            </p>
+          </div>
+
+          <!-- COMPONENT: tabs-horizontal -->
+          <div data-component-id="tabs-horizontal" data-component-type="tabs" data-component-variant="horizontal" class="w-full">
+            <div role="tablist" aria-label="Marcas compatibles" class="inline-flex flex-wrap p-1 rounded bg-surface-container border border-outline-variant gap-1">
+              <button role="tab" id="tab-bellsonic" aria-selected="true" aria-controls="panel-bellsonic" tabindex="0" onclick="selectBrand(&#39;bellsonic&#39;)" class="px-4 py-2 rounded-sm bg-surface-container-lowest text-on-surface shadow-sm transition-colors duration-state-change">
+                <span class="font-label text-label-lg" data-design-text-token="label-lg">Bellsonic</span>
+              </button>
+              <button role="tab" id="tab-commax" aria-selected="false" aria-controls="panel-commax" tabindex="-1" onclick="selectBrand(&#39;commax&#39;)" class="px-4 py-2 rounded-sm text-on-surface-variant hover:text-on-surface transition-colors duration-state-change">
+                <span class="font-label text-label-lg" data-design-text-token="label-lg">Commax / Golmar</span>
+              </button>
+              <button role="tab" id="tab-fermax" aria-selected="false" aria-controls="panel-fermax" tabindex="-1" onclick="selectBrand(&#39;fermax&#39;)" class="px-4 py-2 rounded-sm text-on-surface-variant hover:text-on-surface transition-colors duration-state-change">
+                <span class="font-label text-label-lg" data-design-text-token="label-lg">Fermax VDS/MDS</span>
+              </button>
+              <button role="tab" id="tab-intelbras" aria-selected="false" aria-controls="panel-intelbras" tabindex="-1" onclick="selectBrand(&#39;intelbras&#39;)" class="px-4 py-2 rounded-sm text-on-surface-variant hover:text-on-surface transition-colors duration-state-change">
+                <span class="font-label text-label-lg" data-design-text-token="label-lg">Bticino / Intelbras</span>
+              </button>
+            </div>
+
+            <div id="brand-detail-card" class="mt-6 bg-surface-container-lowest border border-outline-variant rounded-md p-6 grid grid-cols-1 md:grid-cols-3 gap-gutter-lg">
+              <div class="flex flex-col gap-1.5">
+                <span class="font-label text-label-sm text-secondary">Topología de cableado</span>
+                <h3 id="brand-title" class="font-title text-title-lg text-on-surface">Bellsonic Analógico (1980–2005)</h3>
+                <p id="brand-wiring" class="font-mono text-mono-md text-primary">Bus 4+n / 2 hilos · 12V AC</p>
+              </div>
+              <div class="flex flex-col gap-1.5">
+                <span class="font-label text-label-sm text-secondary">Qué se conserva</span>
+                <p id="brand-keep" class="font-body text-body-md text-on-surface-variant">
+                  100% del cableado vertical en montante y los teléfonos interiores de cada apartamento siguen funcionando en paralelo.
+                </p>
+              </div>
+              <div class="flex flex-col gap-1.5">
+                <span class="font-label text-label-sm text-secondary">Intervención Zaguán Digital</span>
+                <p id="brand-install" class="font-body text-body-md text-on-surface-variant">
+                  Gateway SIP en caja de hall + cámara Hikvision ColorVu sobre el acceso + relé paralelo al pestillo y portón de garaje.
+                </p>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- 3-Step Technical Architecture -->
+      <section class="py-section border-b border-outline-variant">
+        <div class="max-w-[1200px] mx-auto px-page-margin flex flex-col gap-gutter-xl">
+          <div class="max-w-2xl flex flex-col gap-2">
+            <h2 class="font-display text-display-md-mobile lg:text-display-md text-on-surface">
+              Cómo funciona la convivencia analógico + digital
+            </h2>
+            <p class="font-body text-body-lg text-on-surface-variant">
+              Sin cortes prolongados ni ingreso de técnicos a las unidades privadas.
+            </p>
+          </div>
+
+          <div class="grid grid-cols-1 md:grid-cols-3 gap-gutter-lg items-stretch">
+            <!-- COMPONENT: card-elevated -->
+            <article data-component-id="card-elevated" data-component-type="card" data-component-variant="elevated" class="bg-surface-container-lowest border border-outline-variant rounded-md p-6 flex flex-col gap-3 h-full">
+              <header class="flex items-center justify-between">
+                <span class="font-mono text-mono-md text-primary bg-surface-variant px-2.5 py-1 rounded-sm">Paso 1 · Hall</span>
+                <span class="material-symbols-outlined text-secondary" aria-hidden="true">settings_input_component</span>
+              </header>
+              <h3 class="font-title text-title-lg text-on-surface" data-design-text-token="title-lg">Derivación en frente de calle</h3>
+              <p class="font-body text-body-md text-on-surface-variant text-pretty" data-design-text-token="body-md">
+                Conectamos el módulo puente en la bornera común del edificio. Captura la señal de timbre y audio sin alterar la línea de cada apartamento.
+              </p>
+            </article>
+
+            <!-- COMPONENT: card-elevated -->
+            <article data-component-id="card-elevated" data-component-type="card" data-component-variant="elevated" class="bg-surface-container-lowest border border-outline-variant rounded-md p-6 flex flex-col gap-3 h-full">
+              <header class="flex items-center justify-between">
+                <span class="font-mono text-mono-md text-primary bg-surface-variant px-2.5 py-1 rounded-sm">Paso 2 · Red IP</span>
+                <span class="material-symbols-outlined text-secondary" aria-hidden="true">router</span>
+              </header>
+              <h3 class="font-title text-title-lg text-on-surface" data-design-text-token="title-lg">Audio y video hacia App y Sala</h3>
+              <p class="font-body text-body-md text-on-surface-variant text-pretty" data-design-text-token="body-md">
+                Al tocar timbre, la llamada llega en simultáneo al teléfono fijo interno, a la app del residente con video HD y a nuestra sala 24/7.
+              </p>
+            </article>
+
+            <!-- COMPONENT: card-elevated -->
+            <article data-component-id="card-elevated" data-component-type="card" data-component-variant="elevated" class="bg-surface-container-lowest border border-outline-variant rounded-md p-6 flex flex-col gap-3 h-full">
+              <header class="flex items-center justify-between">
+                <span class="font-mono text-mono-md text-primary bg-surface-variant px-2.5 py-1 rounded-sm">Paso 3 · Actuación</span>
+                <span class="material-symbols-outlined text-secondary" aria-hidden="true">garage</span>
+              </header>
+              <h3 class="font-title text-title-lg text-on-surface" data-design-text-token="title-lg">Apertura dual puerta y garaje</h3>
+              <p class="font-body text-body-md text-on-surface-variant text-pretty" data-design-text-token="body-md">
+                El relé IoT acciona tanto el pestillo peatonal como la placa del portón vehicular, habilitando además pases QR temporales por WhatsApp.
+              </p>
+            </article>
+          </div>
+        </div>
+      </section>
+
+      <!-- Survey / Quote Form -->
+      <section id="relevamiento" class="py-section bg-surface-container-low">
+        <div class="max-w-[1200px] mx-auto px-page-margin grid grid-cols-1 lg:grid-cols-12 gap-gutter-xl items-center">
+          <div class="lg:col-span-5 flex flex-col gap-3">
+            <h2 class="font-display text-display-md-mobile lg:text-display-md text-on-surface">
+              Relevamiento técnico sin costo en Montevideo
+            </h2>
+            <p class="font-body text-body-lg text-on-surface-variant text-pretty">
+              Un técnico verifica el estado del cableado y la bornera actual del edificio en 30 minutos y entrega presupuesto cerrado para la asamblea de copropietarios.
+            </p>
+          </div>
+
+          <form onsubmit="event.preventDefault(); document.getElementById(&#39;form-confirm&#39;).classList.remove(&#39;hidden&#39;);" class="lg:col-span-7 bg-surface-container-lowest border border-outline-variant rounded-md p-6 grid grid-cols-1 sm:grid-cols-2 gap-gutter-md">
+            <div class="flex flex-col gap-1.5">
+              <label for="edificio-dir" class="font-label text-label-md text-on-surface">Dirección del edificio</label>
+              <input id="edificio-dir" type="text" placeholder="Ej. Bvar. España 2468, Pocitos" class="rounded border-outline-variant bg-surface text-on-surface font-body text-body-md focus:border-primary focus:ring-primary">
+            </div>
+            <div class="flex flex-col gap-1.5">
+              <label for="contacto-tel" class="font-label text-label-md text-on-surface">WhatsApp o teléfono</label>
+              <input id="contacto-tel" type="tel" placeholder="+598 99 000 000" class="rounded border-outline-variant bg-surface text-on-surface font-body text-body-md focus:border-primary focus:ring-primary">
+            </div>
+            <div class="sm:col-span-2 flex flex-wrap items-center justify-between gap-4 pt-2">
+              <span id="form-confirm" class="hidden font-label text-label-md text-success">Solicitud registrada. Coordinamos visita dentro de las próximas 24 hs.</span>
+              <button type="submit" class="px-5 py-2.5 rounded bg-primary text-on-primary font-label text-label-lg hover:bg-primary-container transition-colors duration-state-change">
+                Solicitar relevamiento en edificio
+              </button>
+            </div>
+          </form>
+        </div>
+      </section>
+
+    </main>
+
+    <!-- Footer (exact shell parity with ZaguanWebInicio) -->
+    <footer class="bg-surface border-t border-outline-variant py-8">
+      <div class="max-w-[1200px] mx-auto px-page-margin flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+        <div class="flex flex-col gap-1">
+          <span class="font-headline text-title-md text-on-surface">Zaguán Digital · Montevideo, Uruguay</span>
+          <span class="font-body text-body-sm text-on-surface-variant">Pocitos · Cordón · Centro · Habilitación DI.GE.F.E. vigente</span>
+        </div>
+        <div class="flex flex-wrap items-center gap-6 font-mono text-mono-sm text-on-surface-variant">
+          <span>Emergencias 24/7: 2713 3000</span>
+          <span>WhatsApp: +598 97 999 561</span>
+        </div>
+      </div>
+    </footer>
+
+  </div>
+
+  <script>
+    const BRAND_DATA = {
+      bellsonic: {
+        title: 'Bellsonic Analógico (1980–2005)',
+        wiring: 'Bus 4+n / 2 hilos · 12V AC',
+        keep: '100% del cableado vertical en montante y los teléfonos interiores de cada apartamento siguen funcionando en paralelo.',
+        install: 'Gateway SIP en caja de hall + cámara Hikvision ColorVu sobre el acceso + relé paralelo al pestillo y portón de garaje.'
+      },
+      commax: {
+        title: 'Commax / Golmar Multihilo',
+        wiring: 'Audio analógico 4+n o video coaxial',
+        keep: 'Conservamos monitores y porteros internos existentes sin ingresar a los departamentos.',
+        install: 'Módulo de derivación de llamada y audio bidireccional IP conectado a la central del edificio.'
+      },
+      fermax: {
+        title: 'Fermax VDS / MDS Digital',
+        wiring: 'Bus digital 3 hilos / cableado UTP',
+        keep: 'Se mantiene el bus troncal de datos y los terminales Fermax instalados en cada unidad.',
+        install: 'Interfaz de pasarela SIP/Fermax en tablero general para desvío a app móvil y sala de monitoreo.'
+      },
+      intelbras: {
+        title: 'Bticino / Legrand / Intelbras',
+        wiring: 'Bus 2 hilos no polarizado / PBX',
+        keep: 'Se conserva la central telefónica de portería o el bus de 2 hilos interno.',
+        install: 'Gateway VoIP/SIP + frente IP compacto con cámara AcuSense y lectura QR para entregas.'
+      }
+    };
+
+    function selectBrand(key) {
+      const ids = ['bellsonic', 'commax', 'fermax', 'intelbras'];
+      ids.forEach(id => {
+        const btn = document.getElementById('tab-' + id);
+        const active = id === key;
+        btn.setAttribute('aria-selected', active ? 'true' : 'false');
+        btn.className = active
+          ? 'px-4 py-2 rounded-sm bg-surface-container-lowest text-on-surface shadow-sm transition-colors duration-state-change'
+          : 'px-4 py-2 rounded-sm text-on-surface-variant hover:text-on-surface transition-colors duration-state-change';
+      });
+      const d = BRAND_DATA[key];
+      document.getElementById('brand-title').textContent = d.title;
+      document.getElementById('brand-wiring').textContent = d.wiring;
+      document.getElementById('brand-keep').textContent = d.keep;
+      document.getElementById('brand-install').textContent = d.install;
+    }
+  </script>
+
+
+</body></html>

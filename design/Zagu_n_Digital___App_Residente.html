@@ -1,0 +1,344 @@
+<!DOCTYPE html><html lang="es"><head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Zaguán Digital — App Residente</title>
+  <script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+  <script id="tailwind-config" data-stitch-original-src="131c988d3c566b56===../../tailwind.config.js">/** @type {import('tailwindcss').Config} */
+globalThis.tailwind = globalThis.tailwind || {};
+globalThis.tailwind.config = {
+  darkMode: 'class',
+  theme: {
+    extend: {
+      colors: {
+        'primary': '#002547',
+        'on-primary': '#FFFFFF',
+        'primary-container': '#103B66',
+        'on-primary-container': '#EAF1FF',
+        'secondary': '#076C41',
+        'on-secondary': '#FFFFFF',
+        'secondary-container': '#D3F7E0',
+        'on-secondary-container': '#00391F',
+        'tertiary': '#3B1D00',
+        'on-tertiary': '#FFFFFF',
+        'tertiary-container': '#5A2F00',
+        'on-tertiary-container': '#FFEEE2',
+        'success': '#076C41',
+        'on-success': '#FFFFFF',
+        'success-container': '#D3F7E0',
+        'on-success-container': '#00391F',
+        'warning': '#9A5B00',
+        'on-warning': '#FFFFFF',
+        'warning-container': '#FFE8C2',
+        'on-warning-container': '#593200',
+        'error': '#BA1A1A',
+        'on-error': '#FFFFFF',
+        'error-container': '#FFDAD6',
+        'on-error-container': '#93000A',
+        'background': '#F7F9FB',
+        'on-background': '#191C1E',
+        'surface': '#F7F9FB',
+        'surface-dim': '#D8DADC',
+        'surface-bright': '#F7F9FB',
+        'surface-container-lowest': '#FFFFFF',
+        'surface-container-low': '#F2F4F6',
+        'surface-container': '#ECEEF0',
+        'surface-container-high': '#E6E8EA',
+        'surface-container-highest': '#E0E3E5',
+        'on-surface': '#191C1E',
+        'surface-variant': '#DFE2EC',
+        'on-surface-variant': '#43474F',
+        'outline': '#737780',
+        'outline-variant': '#C3C6D0',
+        'inverse-surface': '#2D3133',
+        'inverse-on-surface': '#EFF1F3',
+        'inverse-primary': '#A5C9FC',
+      },
+      borderRadius: {
+        'sm': '4px',
+        'DEFAULT': '8px',
+        'md': '12px',
+        'lg': '16px',
+        'xl': '24px',
+        'full': '9999px',
+      },
+      spacing: {
+        'gutter-xs': '4px',
+        'gutter-sm': '8px',
+        'gutter-md': '16px',
+        'gutter-lg': '24px',
+        'gutter-xl': '32px',
+        'section': '48px',
+        'page-margin': '24px',
+      },
+      fontFamily: {
+        'display': ['"Manrope"', 'sans-serif'],
+        'headline': ['"Manrope"', 'sans-serif'],
+        'title': ['"Manrope"', 'sans-serif'],
+        'body': ['"Work Sans"', 'sans-serif'],
+        'label': ['"Work Sans"', 'sans-serif'],
+        'mono': ['"Fira Code"', 'monospace'],
+      },
+      fontSize: {
+        'display-lg': ['48px', { lineHeight: '54px', letterSpacing: '-0.75px', fontWeight: '800' }],
+        'display-lg-mobile': ['32px', { lineHeight: '38px', letterSpacing: '-0.5px', fontWeight: '800' }],
+        'display-md': ['36px', { lineHeight: '42px', letterSpacing: '-0.5px', fontWeight: '700' }],
+        'display-md-mobile': ['28px', { lineHeight: '34px', letterSpacing: '-0.25px', fontWeight: '700' }],
+        'headline-lg': ['34px', { lineHeight: '40px', letterSpacing: '-0.25px', fontWeight: '700' }],
+        'headline-lg-mobile': ['24px', { lineHeight: '30px', letterSpacing: '-0.2px', fontWeight: '700' }],
+        'headline-md': ['24px', { lineHeight: '30px', letterSpacing: '-0.15px', fontWeight: '700' }],
+        'headline-sm': ['20px', { lineHeight: '26px', letterSpacing: '0px', fontWeight: '600' }],
+        'title-lg': ['18px', { lineHeight: '24px', letterSpacing: '0px', fontWeight: '600' }],
+        'title-md': ['16px', { lineHeight: '22px', letterSpacing: '0px', fontWeight: '600' }],
+        'body-lg': ['16px', { lineHeight: '24px', letterSpacing: '0px', fontWeight: '400' }],
+        'body-md': ['14px', { lineHeight: '21px', letterSpacing: '0px', fontWeight: '400' }],
+        'body-sm': ['12px', { lineHeight: '18px', letterSpacing: '0.1px', fontWeight: '400' }],
+        'label-lg': ['14px', { lineHeight: '20px', letterSpacing: '0.1px', fontWeight: '600' }],
+        'label-md': ['12px', { lineHeight: '16px', letterSpacing: '0.2px', fontWeight: '600' }],
+        'label-sm': ['11px', { lineHeight: '14px', letterSpacing: '0.25px', fontWeight: '500' }],
+        'mono-md': ['13px', { lineHeight: '18px', letterSpacing: '0px', fontWeight: '500' }],
+        'mono-sm': ['11px', { lineHeight: '16px', letterSpacing: '0.1px', fontWeight: '500' }],
+      },
+      transitionDuration: {
+        'state-change': '120ms',
+        'surface-enter': '220ms',
+        'surface-exit': '150ms',
+      },
+      transitionDelay: {
+        'state-change': '0ms',
+        'surface-enter': '0ms',
+        'surface-exit': '0ms',
+      },
+      transitionTimingFunction: {
+        'state-change': 'ease-out',
+        'surface-enter': 'cubic-bezier(0.2, 0, 0, 1)',
+        'surface-exit': 'cubic-bezier(0.3, 0, 1, 1)',
+      },
+    },
+  },
+};
+if (typeof module !== 'undefined') module.exports = globalThis.tailwind.config;
+</script>
+  <link href="https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;500&amp;family=Manrope:wght@600;700;800&amp;family=Work+Sans:wght@400;500;600&amp;display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=block" rel="stylesheet">
+  <style>.material-symbols-outlined, .material-symbols-rounded, .material-symbols-sharp, .material-icons { display: inline-block; width: 1em; height: 1em; line-height: 1 !important; box-sizing: content-box; overflow: hidden; white-space: nowrap; direction: ltr; vertical-align: middle; }</style>
+</head>
+<body class="bg-surface text-on-surface font-body antialiased">
+  <div class="min-h-screen flex flex-col max-w-[390px] mx-auto bg-surface pb-24">
+
+    <!-- Top App Header -->
+    <header class="sticky top-0 z-30 bg-surface border-b border-outline-variant px-4 py-3 flex items-center justify-between gap-2">
+      <div class="flex items-center gap-2.5">
+        <svg viewBox="0 0 36 36" class="w-8 h-8 shrink-0" aria-hidden="true">
+          <path d="M18 2L5 7.5v9.8c0 8.2 5.5 15.2 13 17.7 7.5-2.5 13-9.5 13-17.7V7.5L18 2z" class="fill-primary"></path>
+          <path d="M13 26V16.5a5 5 0 0 1 10 0V26" fill="none" class="stroke-on-primary" stroke-width="2.2" stroke-linecap="round"></path>
+          <circle cx="18" cy="18.5" r="2.2" class="fill-secondary-container"></circle>
+        </svg>
+        <div class="flex flex-col">
+          <span class="font-label text-label-sm text-on-surface-variant">Edificio Pocitos 2468 · Apto 402</span>
+          <div class="flex items-center gap-2">
+            <h1 class="font-headline text-title-lg text-on-surface">Zaguán Digital</h1>
+            <!-- COMPONENT: badge-success -->
+            <span data-component-id="badge-success" data-component-type="badge" data-component-variant="success" role="status" class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-success-container text-on-success-container">
+              <span class="w-1.5 h-1.5 rounded-full bg-success" aria-hidden="true"></span>
+              <span class="font-label text-label-sm" data-design-text-token="label-sm">24/7</span>
+            </span>
+          </div>
+        </div>
+      </div>
+
+      <button type="button" onclick="triggerPanic()" aria-label="Botón de pánico y llegada segura" class="inline-flex items-center gap-1 px-3 py-1.5 rounded-full bg-error-container text-on-error-container font-label text-label-sm hover:opacity-90 transition-opacity duration-state-change">
+        <span class="material-symbols-outlined text-title-md" aria-hidden="true">emergency_share</span>
+        <span>SOS</span>
+      </button>
+    </header>
+
+    <main class="flex-1 px-4 pt-4 flex flex-col gap-4">
+
+      <!-- Live Feedback Banner (hidden until action) -->
+      <div id="action-toast" class="hidden p-3 rounded bg-success-container text-on-success-container border border-success flex items-center justify-between gap-2" role="status">
+        <div class="flex items-center gap-2">
+          <span class="material-symbols-outlined text-title-md" aria-hidden="true">check_circle</span>
+          <span id="action-toast-text" class="font-label text-label-md">Portón abierto · cierre automático en 35s</span>
+        </div>
+      </div>
+
+      <!-- Live Lobby Camera & Direct Door/Garage Controls -->
+      <section class="bg-surface-container-lowest border border-outline-variant rounded-md overflow-hidden flex flex-col">
+        <div class="relative">
+          <img src="https://lh3.googleusercontent.com/aida/ALJJyrDd27PD8JORv_T-J-LviyCm7A7vJD8LdhrpBBGG-k-WxKpLaJyY_ANGRzOO0Slzw_FbZvcJxf4zoASsScD5fH1R5PwlLiDS47EyF3e_GPt4yt2CDvabop1Cxfa4eLnsS0zUZBhz6oeKTAN6yxis2y0RKTS__87xlHUlt8kyEm-N84IAcZVCuXcdiHjoRiorKDbM42ml7khnzxZnsjWuMSbBW1JZfvXorKohTWBqruv5Hx4j80ppxg0OQYcR" alt="Cámara en vivo del acceso principal del edificio" class="w-full h-44 object-cover" data-stitch-original-src="803cf1195d1a82e6===../../images/lobby_camara_vivo.jpg">
+          <div class="absolute inset-x-0 bottom-0 bg-inverse-surface/80 px-3 py-2 flex items-center justify-between text-inverse-on-surface">
+            <span class="font-label text-label-sm">Frente de calle · Cámara AcuSense</span>
+            <span class="font-mono text-mono-sm tabular-nums">14:32 hs</span>
+          </div>
+        </div>
+
+        <div class="p-3 grid grid-cols-2 gap-2.5">
+          <!-- COMPONENT: button-with-icon -->
+          <button data-component-id="button-with-icon" data-component-type="button" data-component-variant="with-icon" type="button" onclick="showFeedback(&#39;Puerta principal desbloqueada por 8 seg&#39;)" class="inline-flex items-center justify-center gap-1.5 px-3 py-2.5 rounded bg-primary text-on-primary hover:bg-primary-container transition-colors duration-state-change">
+            <span class="material-symbols-outlined text-title-md" aria-hidden="true">door_front</span>
+            <span class="font-label text-label-md" data-design-text-token="label-md">Abrir puerta</span>
+          </button>
+
+          <!-- COMPONENT: button-secondary -->
+          <button data-component-id="button-secondary" data-component-type="button" data-component-variant="secondary" type="button" onclick="showFeedback(&#39;Portón de garaje abierto · cierre auto 35s&#39;)" class="inline-flex items-center justify-center gap-1.5 px-3 py-2.5 rounded bg-surface-container-lowest text-secondary border border-outline-variant hover:bg-surface-container-low transition-colors duration-state-change">
+            <span class="material-symbols-outlined text-title-md" aria-hidden="true">garage</span>
+            <span class="font-label text-label-md" data-design-text-token="label-md">Abrir portón</span>
+          </button>
+        </div>
+      </section>
+
+      <!-- Quick Actions: WhatsApp QR & Amenities -->
+      <section class="grid grid-cols-2 gap-3">
+        <button type="button" onclick="toggleQRPanel()" class="bg-surface-container-lowest border border-outline-variant rounded-md px-3.5 py-3 flex items-center gap-2.5 text-left hover:bg-surface-container-low transition-colors duration-state-change">
+          <span class="w-8 h-8 rounded bg-surface-variant text-primary inline-flex items-center justify-center shrink-0">
+            <span class="material-symbols-outlined text-title-md" aria-hidden="true">qr_code_2</span>
+          </span>
+          <span class="font-title text-title-md text-on-surface">Pase QR</span>
+        </button>
+
+        <button type="button" onclick="showFeedback(&#39;Barbacoa Piso 10: disponible hoy 20:00 hs&#39;)" class="bg-surface-container-lowest border border-outline-variant rounded-md px-3.5 py-3 flex items-center gap-2.5 text-left hover:bg-surface-container-low transition-colors duration-state-change">
+          <span class="w-8 h-8 rounded bg-secondary-container text-on-secondary-container inline-flex items-center justify-center shrink-0">
+            <span class="material-symbols-outlined text-title-md" aria-hidden="true">calendar_month</span>
+          </span>
+          <span class="font-title text-title-md text-on-surface">Barbacoa</span>
+        </button>
+      </section>
+
+      <!-- Inline QR Pass Generator (toggled by Pase QR) -->
+      <section id="qr-panel" class="hidden bg-surface-container-low border border-outline-variant rounded-md p-4 flex flex-col gap-3">
+        <div class="flex items-center justify-between">
+          <span class="font-title text-title-md text-on-surface">Nuevo pase temporal</span>
+          <span class="font-mono text-mono-md text-primary bg-surface-variant px-2 py-0.5 rounded-sm">ZAG-8492</span>
+        </div>
+        <div class="grid grid-cols-3 gap-2">
+          <button type="button" onclick="showFeedback(&#39;QR enviado por WhatsApp para PedidosYa (15 min)&#39;)" class="py-2 px-2 rounded bg-surface-container-lowest border border-outline-variant font-label text-label-sm text-on-surface hover:border-primary">PedidosYa</button>
+          <button type="button" onclick="showFeedback(&#39;QR enviado por WhatsApp para MercadoLibre (30 min)&#39;)" class="py-2 px-2 rounded bg-surface-container-lowest border border-outline-variant font-label text-label-sm text-on-surface hover:border-primary">MercadoLibre</button>
+          <button type="button" onclick="showFeedback(&#39;QR enviado por WhatsApp para Visita (4 hs)&#39;)" class="py-2 px-2 rounded bg-surface-container-lowest border border-outline-variant font-label text-label-sm text-on-surface hover:border-primary">Visita</button>
+        </div>
+      </section>
+
+      <!-- Parcel Photo Alert Card -->
+      <!-- COMPONENT: card-action -->
+      <article data-component-id="card-action" data-component-type="card" data-component-variant="action" class="bg-surface-container-lowest border border-outline-variant rounded-md p-3.5 flex flex-col gap-3">
+        <div class="flex items-center gap-3">
+          <img src="https://lh3.googleusercontent.com/aida/ALJJyrCFIqnwyPL-GK1HMWKzQ3GnEz640uekqrm-0jM51h-yGwQ9qLQeA2vjTh0jyLZqIJKbvOsNimpYcQ4pQcGt-U1IfAWZc4lADHTNeVLpzN-9o3bE6uXAtBEQehHl8pokIGak8N3e8NbAUNJtA43JK1i8S_GjMT_PAKeTzj2-MCLKfCD-9T1qZ4rh6mrPuGEfB9Qa7ky_0VMV76KkVW5WQBDGmMkQaecl0pRpxBaMU-BmzaeE2CIRfH2TK3z6Yw" alt="Foto de encomienda recibida en portería" class="w-16 h-16 rounded object-cover border border-outline-variant shrink-0" data-stitch-original-src="c7eb71249791d61b===../../images/paquete_recepcion.jpg">
+          <div class="flex-1 min-w-0">
+            <div class="flex items-center justify-between gap-2">
+              <h2 class="font-title text-title-md text-on-surface" data-design-text-token="title-md">Encomienda recibida</h2>
+              <!-- COMPONENT: badge-warning -->
+              <span data-component-id="badge-warning" data-component-type="badge" data-component-variant="warning" role="status" class="inline-flex items-center px-2 py-0.5 rounded-full bg-warning-container text-on-warning-container">
+                <span class="font-label text-label-sm" data-design-text-token="label-sm">Pendiente</span>
+              </span>
+            </div>
+            <p class="font-body text-body-sm text-on-surface-variant mt-0.5" data-design-text-token="body-sm">MercadoLibre · Hoy 14:18 hs en Hall PB</p>
+          </div>
+        </div>
+        <footer class="flex items-center justify-between pt-2 border-t border-outline-variant">
+          <span class="font-mono text-mono-sm text-secondary">Retiro: #ML-402</span>
+          <button type="button" onclick="showFeedback(&#39;Retiro de encomienda confirmado&#39;)" class="px-3 py-1.5 rounded bg-surface-container-low border border-outline-variant font-label text-label-md text-primary hover:bg-surface-container">
+            Confirmar retiro
+          </button>
+        </footer>
+      </article>
+
+      <!-- Tabbed Recent Activity & Consorcio Rules -->
+      <!-- COMPONENT: tabs-horizontal -->
+      <div data-component-id="tabs-horizontal" data-component-type="tabs" data-component-variant="horizontal" class="w-full">
+        <div role="tablist" aria-label="Historial y documentos" class="grid grid-cols-2 p-1 rounded bg-surface-container border border-outline-variant gap-1">
+          <button role="tab" id="tab-actividad" aria-selected="true" aria-controls="panel-actividad" tabindex="0" onclick="switchTab(&#39;actividad&#39;)" class="py-1.5 rounded-sm bg-surface-container-lowest text-on-surface shadow-sm transition-colors duration-state-change">
+            <span class="font-label text-label-md" data-design-text-token="label-md">Actividad</span>
+          </button>
+          <button role="tab" id="tab-reglamento" aria-selected="false" aria-controls="panel-reglamento" tabindex="-1" onclick="switchTab(&#39;reglamento&#39;)" class="py-1.5 rounded-sm text-on-surface-variant hover:text-on-surface transition-colors duration-state-change">
+            <span class="font-label text-label-md" data-design-text-token="label-md">Consorcio</span>
+          </button>
+        </div>
+
+        <div role="tabpanel" id="panel-actividad" aria-labelledby="tab-actividad" tabindex="0" class="mt-3 bg-surface-container-lowest border border-outline-variant rounded-md divide-y divide-outline-variant">
+          <div class="p-3 flex items-center justify-between gap-2">
+            <div>
+              <p class="font-label text-label-md text-on-surface">Ingreso garaje — Matrícula SBY 4821</p>
+              <p class="font-body text-body-sm text-on-surface-variant">Apertura desde app · Apto 402</p>
+            </div>
+            <span class="font-mono text-mono-sm text-on-surface-variant tabular-nums">12:05</span>
+          </div>
+          <div class="p-3 flex items-center justify-between gap-2">
+            <div>
+              <p class="font-label text-label-md text-on-surface">Pase QR PedidosYa utilizado</p>
+              <p class="font-body text-body-sm text-on-surface-variant">Puerta principal · Expirado</p>
+            </div>
+            <span class="font-mono text-mono-sm text-on-surface-variant tabular-nums">10:42</span>
+          </div>
+        </div>
+
+        <div role="tabpanel" id="panel-reglamento" aria-labelledby="tab-reglamento" tabindex="0" hidden class="mt-3 bg-surface-container-lowest border border-outline-variant rounded-md divide-y divide-outline-variant">
+          <div class="p-3 flex items-center justify-between gap-2">
+            <div>
+              <p class="font-label text-label-md text-on-surface">Reglamento de Copropiedad</p>
+              <p class="font-body text-body-sm text-on-surface-variant">Uso de barbacoa y horarios</p>
+            </div>
+            <span class="material-symbols-outlined text-secondary" aria-hidden="true">description</span>
+          </div>
+          <div class="p-3 flex items-center justify-between gap-2">
+            <div>
+              <p class="font-label text-label-md text-on-surface">Certificados Ley 18.251 (Nov 2026)</p>
+              <p class="font-body text-body-sm text-on-surface-variant">BPS, DGI y BSE al día</p>
+            </div>
+            <span class="material-symbols-outlined text-success" aria-hidden="true">verified</span>
+          </div>
+        </div>
+      </div>
+
+    </main>
+
+    <!-- Bottom Navigation Dock -->
+    <nav aria-label="Navegación de la app" class="fixed bottom-0 inset-x-0 max-w-[390px] mx-auto bg-surface-container-lowest border-t border-outline-variant px-2 py-2 grid grid-cols-4 gap-1 z-30">
+      <a href="#inicio" class="flex flex-col items-center gap-0.5 py-1 text-primary">
+        <span class="material-symbols-outlined text-title-lg" style="font-variation-settings: &#39;FILL&#39; 1;" aria-hidden="true">home</span>
+        <span class="font-label text-label-sm">Inicio</span>
+      </a>
+      <a href="#accesos" onclick="toggleQRPanel(); return false;" class="flex flex-col items-center gap-0.5 py-1 text-on-surface-variant hover:text-on-surface">
+        <span class="material-symbols-outlined text-title-lg" aria-hidden="true">qr_code_2</span>
+        <span class="font-label text-label-sm">Accesos</span>
+      </a>
+      <a href="#paquetes" class="relative flex flex-col items-center gap-0.5 py-1 text-on-surface-variant hover:text-on-surface">
+        <span class="material-symbols-outlined text-title-lg" aria-hidden="true">inventory_2</span>
+        <span class="font-label text-label-sm">Paquetes</span>
+        <span class="absolute top-0.5 right-5 w-4 h-4 rounded-full bg-primary text-on-primary font-label text-label-sm inline-flex items-center justify-center">1</span>
+      </a>
+      <a href="#consorcio" onclick="switchTab(&#39;reglamento&#39;); return false;" class="flex flex-col items-center gap-0.5 py-1 text-on-surface-variant hover:text-on-surface">
+        <span class="material-symbols-outlined text-title-lg" aria-hidden="true">apartment</span>
+        <span class="font-label text-label-sm">Consorcio</span>
+      </a>
+    </nav>
+
+  </div>
+
+  <script>
+    function showFeedback(msg) {
+      const el = document.getElementById('action-toast');
+      document.getElementById('action-toast-text').textContent = msg;
+      el.classList.remove('hidden');
+    }
+    function toggleQRPanel() {
+      document.getElementById('qr-panel').classList.toggle('hidden');
+    }
+    function triggerPanic() {
+      showFeedback('Alerta SOS enviada a Sala 24/7 con tu geolocalización');
+    }
+    function switchTab(name) {
+      const isAct = name === 'actividad';
+      document.getElementById('tab-actividad').setAttribute('aria-selected', isAct ? 'true' : 'false');
+      document.getElementById('tab-reglamento').setAttribute('aria-selected', !isAct ? 'true' : 'false');
+      document.getElementById('tab-actividad').className = isAct
+        ? 'py-1.5 rounded-sm bg-surface-container-lowest text-on-surface shadow-sm transition-colors duration-state-change'
+        : 'py-1.5 rounded-sm text-on-surface-variant hover:text-on-surface transition-colors duration-state-change';
+      document.getElementById('tab-reglamento').className = !isAct
+        ? 'py-1.5 rounded-sm bg-surface-container-lowest text-on-surface shadow-sm transition-colors duration-state-change'
+        : 'py-1.5 rounded-sm text-on-surface-variant hover:text-on-surface transition-colors duration-state-change';
+      document.getElementById('panel-actividad').hidden = !isAct;
+      document.getElementById('panel-reglamento').hidden = isAct;
+    }
+  </script>
+
+
+</body></html>

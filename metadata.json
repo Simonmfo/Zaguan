@@ -1,0 +1,6 @@
+{
+  "name": "Zaguán Digital",
+  "description": "Portería virtual, módulo retrofit para edificios antiguos y app residente en Montevideo, Uruguay.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
