@@ -78,6 +78,7 @@ interface AppResidenteViewProps {
   onAuthorizeParcelPin: (id: string) => string;
   onTriggerDuressAlert: (source: string) => void;
   onLogActivity: (event: Omit<ActivityEvent, 'id'>) => void;
+  onOpenPublicMagicLink: (token: string) => void;
   onNavigateMain: (screen: MainScreen) => void;
 }
 
@@ -118,6 +119,7 @@ export function AppResidenteView({
   onAuthorizeParcelPin,
   onTriggerDuressAlert,
   onLogActivity,
+  onOpenPublicMagicLink,
   onNavigateMain,
 }: AppResidenteViewProps) {
   const [toastMessage, setToastMessage] = useState<string | null>(null);
@@ -1668,12 +1670,13 @@ export function AppResidenteView({
                       <button
                         type="button"
                         onClick={() => {
+                          const targetToken = sharedPassPreview.code;
                           setSharedPassPreview(null);
-                          onNavigateMain('portero-ia');
+                          onOpenPublicMagicLink(targetToken);
                         }}
                         className="py-2 px-2 rounded bg-primary text-on-primary font-label text-label-sm cursor-pointer"
                       >
-                        Probar en E12W
+                        Abrir /pase/{sharedPassPreview.code}
                       </button>
                     </div>
                   </div>

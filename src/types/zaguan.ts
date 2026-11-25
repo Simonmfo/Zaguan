@@ -28,6 +28,9 @@ export interface BuildingRecord {
   name: string;
   address: string;
   city: string;
+  latitude: number;
+  longitude: number;
+  geofenceRadiusMeters: number;
   parcelStorageMode: ParcelStorageMode;
   parcelHoursStart: string;
   parcelHoursEnd: string;

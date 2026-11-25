@@ -257,6 +257,209 @@ app.post('/api/akuvox/validate-pass', (req, res) => {
   res.json({ granted: true, reason: 'Permiso validado.' });
 });
 
+// ============================================================================
+// 8. Flujo Público de Magic Link (/api/pase/:token y /api/pase/:token/open)
+// ============================================================================
+interface StoredMagicPass {
+  token: string;
+  pin: string;
+  guestName: string;
+  unit: string;
+  passType: 'one_time' | 'recurring_schedule' | 'permanent';
+  status: 'active' | 'used' | 'revoked' | 'expired';
+  validFromIso: string;
+  validUntilIso: string;
+  accessScope: string;
+  buildingName: string;
+  buildingAddress: string;
+  latitude: number;
+  longitude: number;
+  geofenceRadiusMeters: number;
+}
+
+function haversineMeters(lat1: number, lon1: number, lat2: number, lon2: number): number {
+  const R = 6371000;
+  const toRad = (deg: number) => (deg * Math.PI) / 180;
+  const dLat = toRad(lat2 - lat1);
+  const dLon = toRad(lon2 - lon1);
+  const a =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLon / 2) ** 2;
+  return Math.round(R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a)) * 10) / 10;
+}
+
+const magicPassStore = new Map<string, StoredMagicPass>([
+  [
+    'ZAG-7310',
+    {
+      token: 'ZAG-7310',
+      pin: '7310',
+      guestName: 'Sofía Méndez (Visita)',
+      unit: '4B',
+      passType: 'one_time',
+      status: 'active',
+      validFromIso: new Date(Date.now() - 10 * 60 * 1000).toISOString(),
+      validUntilIso: new Date(Date.now() + 4 * 3600 * 1000).toISOString(),
+      accessScope: 'Acceso peatonal y garaje',
+      buildingName: 'Edificio Pocitos 2468',
+      buildingAddress: 'Bvar. España 2468, Pocitos, Montevideo',
+      latitude: -34.91462,
+      longitude: -56.15189,
+      geofenceRadiusMeters: 30,
+    },
+  ],
+  [
+    'ZAG-6104',
+    {
+      token: 'ZAG-6104',
+      pin: '6104',
+      guestName: 'PedidosYa Market',
+      unit: '4B',
+      passType: 'one_time',
+      status: 'used',
+      validFromIso: new Date(Date.now() - 3 * 3600 * 1000).toISOString(),
+      validUntilIso: new Date(Date.now() + 3600 * 1000).toISOString(),
+      accessScope: 'Acceso peatonal',
+      buildingName: 'Edificio Pocitos 2468',
+      buildingAddress: 'Bvar. España 2468, Pocitos, Montevideo',
+      latitude: -34.91462,
+      longitude: -56.15189,
+      geofenceRadiusMeters: 30,
+    },
+  ],
+]);
+
+// Registrar/sincronizar pases nuevos creados en la App Residente hacia el backend LAN
+app.post('/api/pase/register', (req, res) => {
+  const b = req.body ?? {};
+  const token = String(b.token || '').trim().toUpperCase();
+  if (!token) {
+    res.status(400).json({ ok: false, message: 'Token requerido.' });
+    return;
+  }
+  magicPassStore.set(token, {
+    token,
+    pin: String(b.pin || '0000'),
+    guestName: String(b.guestName || 'Visita'),
+    unit: String(b.unit || '4B'),
+    passType: b.passType || 'one_time',
+    status: b.status || 'active',
+    validFromIso: b.validFromIso || new Date().toISOString(),
+    validUntilIso: b.validUntilIso || new Date(Date.now() + 2 * 3600 * 1000).toISOString(),
+    accessScope: String(b.accessScope || 'Acceso peatonal'),
+    buildingName: String(b.buildingName || 'Edificio Pocitos 2468'),
+    buildingAddress: String(b.buildingAddress || 'Bvar. España 2468, Pocitos, Montevideo'),
+    latitude: Number(b.latitude ?? -34.91462),
+    longitude: Number(b.longitude ?? -56.15189),
+    geofenceRadiusMeters: Number(b.geofenceRadiusMeters ?? 30),
+  });
+  res.json({ ok: true, token });
+});
+
+// Validar estado de un Magic Link público (/pase/[token])
+app.get('/api/pase/:token', (req, res) => {
+  const token = String(req.params.token || '').trim().toUpperCase();
+  const pass = magicPassStore.get(token);
+
+  if (!pass) {
+    res.status(404).json({
+      valid: false,
+      status: 'not_found',
+      reason: 'Este enlace de acceso no existe o fue eliminado.',
+    });
+    return;
+  }
+
+  const now = Date.now();
+  if (pass.status === 'active' && new Date(pass.validUntilIso).getTime() <= now) {
+    pass.status = 'expired';
+  }
+
+  if (pass.status !== 'active') {
+    const reasons: Record<string, string> = {
+      used: 'Este pase de un solo uso ya fue utilizado y se destruyó automáticamente.',
+      expired: 'Este pase expiró fuera de su ventana horaria.',
+      revoked: 'Este pase fue revocado por el residente.',
+    };
+    res.status(410).json({
+      valid: false,
+      status: pass.status,
+      reason: reasons[pass.status] || 'El pase ya no es válido.',
+      buildingName: pass.buildingName,
+    });
+    return;
+  }
+
+  res.json({
+    valid: true,
+    pass,
+  });
+});
+
+// Abrir puerta por Magic Link validando proximidad GPS (<= geofenceRadiusMeters) y quemando pase one_time
+app.post('/api/pase/:token/open', (req, res) => {
+  const token = String(req.params.token || '').trim().toUpperCase();
+  const pass = magicPassStore.get(token);
+
+  if (!pass) {
+    res.status(404).json({ granted: false, reason: 'El pase no existe.' });
+    return;
+  }
+
+  if (pass.status === 'active' && new Date(pass.validUntilIso).getTime() <= Date.now()) {
+    pass.status = 'expired';
+  }
+
+  if (pass.status !== 'active') {
+    res.status(410).json({
+      granted: false,
+      reason: 'Este pase ya fue usado, expiró o fue revocado.',
+    });
+    return;
+  }
+
+  const lat = Number(req.body?.lat);
+  const lng = Number(req.body?.lng);
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
+    res.status(400).json({
+      granted: false,
+      reason: 'Se requieren coordenadas GPS válidas para abrir la puerta.',
+    });
+    return;
+  }
+
+  const distance = haversineMeters(lat, lng, pass.latitude, pass.longitude);
+  if (distance > pass.geofenceRadiusMeters) {
+    res.status(403).json({
+      granted: false,
+      distanceMeters: distance,
+      maxRadiusMeters: pass.geofenceRadiusMeters,
+      reason: `Estás a ${Math.round(distance)} m de la puerta. Acercate a menos de ${pass.geofenceRadiusMeters} m para habilitar la apertura.`,
+    });
+    return;
+  }
+
+  // Quemar el pase one_time al instante
+  if (pass.passType === 'one_time') {
+    pass.status = 'used';
+  }
+
+  recordEvent('qr_scan', {
+    token: pass.token,
+    guest: pass.guestName,
+    unit: pass.unit,
+    distanceMeters: String(distance),
+    method: 'magic_link_gps',
+  });
+
+  res.json({
+    granted: true,
+    distanceMeters: distance,
+    burned: pass.passType === 'one_time',
+    message: 'Puerta abierta. Bienvenido al edificio.',
+  });
+});
+
 app.listen(PORT, '0.0.0.0', () => {
   console.log(`Zaguán Digital — Puente Akuvox E12W activo en http://0.0.0.0:${PORT}`);
   console.log(`  • Third-Party QR Webhook: http://<TU_IP>:${PORT}/api/akuvox/webhook/qr?codeKey={QRCode}&deviceId={DeviceID}`);

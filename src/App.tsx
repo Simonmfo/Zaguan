@@ -3,6 +3,7 @@ import { AppResidenteView } from './components/AppResidenteView';
 import { ModuloRetrofitView } from './components/ModuloRetrofitView';
 import { PanelAdminView } from './components/PanelAdminView';
 import { PorteroIaView } from './components/PorteroIaView';
+import { PublicMagicLinkView } from './components/PublicMagicLinkView';
 import { SiteFooter } from './components/SiteFooter';
 import { SiteHeader } from './components/SiteHeader';
 import { WebPrincipalView } from './components/WebPrincipalView';
@@ -78,7 +79,21 @@ function timeToMinutes(hhmm: string): number {
   return (h || 0) * 60 + (m || 0);
 }
 
+function extractMagicLinkTokenFromUrl(): string | null {
+  if (typeof window === 'undefined') return null;
+  const pathMatch = /^\/pase\/([^/?#]+)/i.exec(window.location.pathname);
+  if (pathMatch?.[1]) {
+    return decodeURIComponent(pathMatch[1]);
+  }
+  const params = new URLSearchParams(window.location.search);
+  const queryPass = params.get('pass');
+  return queryPass ? queryPass.trim() : null;
+}
+
 export default function App() {
+  const [magicLinkToken, setMagicLinkToken] = useState<string | null>(() =>
+    extractMagicLinkTokenFromUrl()
+  );
   const [activeScreen, setActiveScreen] = useState<MainScreen>('web-principal');
   const [pendingAnchor, setPendingAnchor] = useState<string | null>(null);
   const [residentTab, setResidentTab] = useState<ResidentTab>('inicio');
@@ -330,6 +345,27 @@ export default function App() {
     return () => clearInterval(timer);
   }, [akuvoxConfig, handleLogActivity, handleLogAkuvoxProtocol]);
 
+  // Sync browser URL changes (/pase/[token] <-> portal)
+  useEffect(() => {
+    const onPopState = () => {
+      setMagicLinkToken(extractMagicLinkTokenFromUrl());
+    };
+    window.addEventListener('popstate', onPopState);
+    return () => window.removeEventListener('popstate', onPopState);
+  }, []);
+
+  const handleOpenPublicMagicLink = (token: string) => {
+    const clean = token.trim().toUpperCase();
+    window.history.pushState({}, '', `/pase/${encodeURIComponent(clean)}`);
+    setMagicLinkToken(clean);
+    window.scrollTo({ top: 0 });
+  };
+
+  const handleExitPublicMagicLink = () => {
+    window.history.pushState({}, '', '/');
+    setMagicLinkToken(null);
+  };
+
   // Scroll anchor effect
   useEffect(() => {
     if (!pendingAnchor) return;
@@ -469,12 +505,93 @@ export default function App() {
   const handleCreatePass = (newPass: QrPass) => {
     setPasses((prev) => [newPass, ...prev]);
     void syncSingleUsePassToSupabase(activeBuildingId, newPass);
+    const activeBldg = buildings.find((b) => b.id === activeBuildingId) ?? buildings[0];
+    // Sincronizar con backend LAN (/api/pase/register) para validación pública en /pase/[token]
+    fetch('/api/pase/register', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        token: newPass.code,
+        pin: newPass.pin,
+        guestName: newPass.guestName,
+        unit: newPass.unit || BUILDING_INFO.activeUnit,
+        passType: newPass.singleUse ? 'one_time' : 'permanent',
+        status: 'active',
+        validFromIso: new Date().toISOString(),
+        validUntilIso: newPass.validUntilIso,
+        accessScope: newPass.accessScope,
+        buildingName: activeBldg.name,
+        buildingAddress: activeBldg.address,
+        latitude: activeBldg.latitude,
+        longitude: activeBldg.longitude,
+        geofenceRadiusMeters: activeBldg.geofenceRadiusMeters,
+      }),
+    }).catch(() => {});
     handleLogActivity({
       title: `Pase 1 uso código voz ${newPass.pin} creado (${newPass.typeLabel})`,
-      subtitle: `${newPass.guestName} · ${newPass.validityLabel} · Magic Link WhatsApp`,
+      subtitle: `${newPass.guestName} · ${newPass.validityLabel} · Magic Link /pase/${newPass.code}`,
       time: nowTime(),
       category: 'qr',
     });
+  };
+
+  const handleRedeemMagicLinkPass = (
+    token: string,
+    coords: { lat: number; lng: number; distanceMeters: number }
+  ): { granted: boolean; reason?: string; burned?: boolean } => {
+    const clean = token.trim().toUpperCase();
+    const target = passes.find(
+      (p) => p.code.toUpperCase() === clean || p.pin.toUpperCase() === clean
+    );
+    const activeBldg = buildings.find((b) => b.id === activeBuildingId) ?? buildings[0];
+
+    if (!target) {
+      return { granted: false, reason: 'El enlace del pase no existe.' };
+    }
+    const validity = isSingleUsePassValidNow(target);
+    if (!validity.ok) {
+      return { granted: false, reason: validity.reason || 'El pase ya no es válido.' };
+    }
+    if (coords.distanceMeters > activeBldg.geofenceRadiusMeters) {
+      handleLogActivity({
+        title: `Intento Magic Link a distancia bloqueado (${Math.round(coords.distanceMeters)}m)`,
+        subtitle: `${target.guestName} · Radio máximo ${activeBldg.geofenceRadiusMeters}m · Apto ${target.unit || '4B'}`,
+        time: nowTime(),
+        category: 'alerta',
+      });
+      return {
+        granted: false,
+        reason: `Estás a ${Math.round(coords.distanceMeters)} m. Acercate a menos de ${activeBldg.geofenceRadiusMeters} m.`,
+      };
+    }
+
+    // Trigger physical Akuvox E12W Relay 1 + burn single-use pass immediately!
+    setDoor1Countdown(10);
+    setDoor2Countdown(10);
+    void dispatchHardwareRelay(1);
+
+    if (target.singleUse) {
+      setPasses((prev) =>
+        prev.map((p) =>
+          p.id === target.id
+            ? {
+                ...p,
+                status: 'Usado',
+                detailText: `Abrió vía Magic Link (${Math.round(coords.distanceMeters)}m) · Quemado`,
+              }
+            : p
+        )
+      );
+    }
+
+    handleLogActivity({
+      title: `Apertura Magic Link ${target.code} (GPS ${Math.round(coords.distanceMeters)}m)`,
+      subtitle: `${target.guestName} · Pase ${target.singleUse ? 'quemado (1 uso)' : 'activo'} · Apto ${target.unit || '4B'}`,
+      time: nowTime(),
+      category: 'qr',
+    });
+
+    return { granted: true, burned: target.singleUse };
   };
 
   const handleRevokePass = (passId: string) => {
@@ -1138,6 +1255,20 @@ export default function App() {
   };
 
   const openAlertsCount = securityAlerts.filter((a) => !a.resolved).length;
+  const activeBuilding = buildings.find((b) => b.id === activeBuildingId) ?? buildings[0];
+
+  // Standalone Zero-App Public Magic Link Route (/pase/[token])
+  if (magicLinkToken) {
+    return (
+      <PublicMagicLinkView
+        token={magicLinkToken}
+        passes={passes}
+        building={activeBuilding}
+        onRedeemMagicLinkPass={handleRedeemMagicLinkPass}
+        onExitToPortal={handleExitPublicMagicLink}
+      />
+    );
+  }
 
   return (
     <div className="min-h-screen flex flex-col bg-surface text-on-surface font-body">
@@ -1242,6 +1373,7 @@ export default function App() {
           onAuthorizeParcelPin={handleAuthorizeParcelPin}
           onTriggerDuressAlert={handleTriggerDuressAlert}
           onLogActivity={handleLogActivity}
+          onOpenPublicMagicLink={handleOpenPublicMagicLink}
           onNavigateMain={handleNavigate}
         />
       )}

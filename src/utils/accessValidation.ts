@@ -102,12 +102,29 @@ export function isRecurringPassAllowedAt(
   return { ok: true };
 }
 
+export function calculateHaversineMeters(
+  lat1: number,
+  lon1: number,
+  lat2: number,
+  lon2: number
+): number {
+  const R = 6371000;
+  const toRad = (deg: number) => (deg * Math.PI) / 180;
+  const dLat = toRad(lat2 - lat1);
+  const dLon = toRad(lon2 - lon1);
+  const a =
+    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+    Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLon / 2) * Math.sin(dLon / 2);
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  return Math.round(R * c * 10) / 10;
+}
+
 export function buildMagicLinkUrl(code: string): string {
   const origin =
     typeof window !== 'undefined' && window.location?.origin
       ? window.location.origin
       : 'https://zaguan.uy';
-  return `${origin}/?pass=${encodeURIComponent(code)}`;
+  return `${origin}/pase/${encodeURIComponent(code)}`;
 }
 
 export function buildWhatsAppShareHref(params: {

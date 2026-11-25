@@ -234,6 +234,9 @@ export async function fetchBuildingsFromSupabase(): Promise<BuildingRecord[] | n
     name: String(row.name),
     address: String(row.address),
     city: String(row.city || 'Montevideo'),
+    latitude: Number(row.latitude ?? -34.91462),
+    longitude: Number(row.longitude ?? -56.15189),
+    geofenceRadiusMeters: Number(row.geofence_radius_meters ?? 30),
     parcelStorageMode: row.parcel_storage_mode === 'locker' ? 'locker' : 'zaguan',
     parcelHoursStart: String(row.parcel_schedule_config?.start_time || '08:00'),
     parcelHoursEnd: String(row.parcel_schedule_config?.end_time || '22:00'),
@@ -241,6 +244,32 @@ export async function fetchBuildingsFromSupabase(): Promise<BuildingRecord[] | n
     akuvoxIp: String(row.akuvox_endpoint || '192.168.1.120'),
     akuvoxApiUser: String(row.akuvox_api_user || 'admin'),
   }));
+}
+
+export async function fetchPublicMagicLinkFromSupabase(token: string) {
+  const client = getSupabaseClient();
+  if (!client) return null;
+  const { data, error } = await client.rpc('get_public_magic_link_pass', {
+    p_qr_token: token,
+  });
+  if (error || !data) return null;
+  return data as Record<string, unknown>;
+}
+
+export async function redeemMagicLinkInSupabase(
+  token: string,
+  lat: number,
+  lng: number
+): Promise<{ granted: boolean; reason?: string; distance_meters?: number; burned?: boolean } | null> {
+  const client = getSupabaseClient();
+  if (!client) return null;
+  const { data, error } = await client.rpc('redeem_magic_link_pass', {
+    p_qr_token: token,
+    p_lat: lat,
+    p_lng: lng,
+  });
+  if (error || !data) return null;
+  return data as { granted: boolean; reason?: string; distance_meters?: number; burned?: boolean };
 }
 
 export function subscribeToAccessLogsRealtime(
