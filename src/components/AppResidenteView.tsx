@@ -24,6 +24,7 @@ import {
   PassTypeKey,
   PendingSpontaneousParcel,
   PendingVisitRequest,
+  PreAuthParcelRule,
   PreAuthorizedParcel,
   QrPass,
   RecurringPass,
@@ -73,7 +74,13 @@ interface AppResidenteViewProps {
   ) => void;
   onRevokeRecurringPass: (id: string) => void;
   onToggleStaffShift: (id: string) => void;
-  onCreatePreAuthParcel: (carrier: string, description: string, mode: ParcelStorageMode) => void;
+  onCreatePreAuthParcel: (
+    carrier: string,
+    description: string,
+    mode: ParcelStorageMode,
+    timeWindowLabel: string,
+    autoRule: PreAuthParcelRule
+  ) => void;
   onConfirmParcel: (id: string) => void;
   onAuthorizeParcelPin: (id: string) => string;
   onTriggerDuressAlert: (source: string) => void;
@@ -168,6 +175,9 @@ export function AppResidenteView({
   // Pre-auth parcel quick form
   const [preAuthCarrier, setPreAuthCarrier] = useState('Mercado Libre');
   const [preAuthDesc, setPreAuthDesc] = useState('');
+  const [preAuthWindow, setPreAuthWindow] = useState('Hoy 09:00–18:00');
+  const [preAuthAutoRule, setPreAuthAutoRule] =
+    useState<PreAuthParcelRule>('auto_open_after_ocr');
   const [preAuthMode, setPreAuthMode] = useState<ParcelStorageMode>(storageMode);
 
   useEffect(() => {
@@ -202,7 +212,9 @@ export function AppResidenteView({
     }
   };
 
-  const pendingParcels = parcels.filter((p) => p.status === 'Para retirar');
+  const pendingParcels = parcels.filter(
+    (p) => p.status === 'Para retirar' || p.status === 'delivered'
+  );
   const primaryParcel = parcels[0];
   const historyParcels = parcels.slice(1);
   const appNotices = notices.filter((n) => n.sentToApp);
@@ -406,10 +418,14 @@ export function AppResidenteView({
 
   const handlePreAuthSubmit = (e: FormEvent) => {
     e.preventDefault();
-    const desc = preAuthDesc.trim() || `Envío ${preAuthCarrier} esperado hoy`;
-    onCreatePreAuthParcel(preAuthCarrier, desc, preAuthMode);
+    const desc = preAuthDesc.trim() || `Envío ${preAuthCarrier} esperado`;
+    onCreatePreAuthParcel(preAuthCarrier, desc, preAuthMode, preAuthWindow, preAuthAutoRule);
     showFeedback(
-      `Pre-autorizado: ${preAuthCarrier} (${preAuthMode === 'locker' ? 'Locker' : 'Zaguán'}) · OCR IA activo`
+      `Pre-autorizado: ${preAuthCarrier} (${preAuthWindow}) · ${
+        preAuthAutoRule === 'auto_open_after_ocr'
+          ? 'Apertura automática tras OCR'
+          : 'Pedir confirmación con foto'
+      }`
     );
     setPreAuthDesc('');
   };
@@ -525,29 +541,44 @@ export function AppResidenteView({
                 </div>
               )}
 
-              {/* Live Spontaneous Parcel Push Banner */}
+              {/* Live Unannounced / Confirmation-Required Parcel Push Banner with Photo */}
               {pendingSpontaneous && pendingSpontaneous.status === 'Esperando' && (
-                <div className="p-3 rounded-md bg-warning-container text-on-warning-container border border-warning flex flex-col gap-2">
+                <div className="p-3 rounded-md bg-warning-container text-on-warning-container border-2 border-warning flex flex-col gap-2.5 shadow">
                   <div className="flex items-center justify-between">
-                    <span className="font-label text-label-sm">PAQUETE EN PUERTA</span>
+                    <span className="font-label text-label-sm">
+                      PAQUETE EN PUERTA · CONFIRMACIÓN
+                    </span>
                     <span className="font-mono text-mono-sm font-semibold tabular-nums">
                       {pendingSpontaneous.secondsLeft}s
                     </span>
                   </div>
-                  <p className="font-body text-body-sm">
-                    Llegó <strong>{pendingSpontaneous.carrier}</strong>. ¿Lo dejamos en el{' '}
-                    {storageMode === 'locker' ? 'Locker #B2' : 'zaguán'}?
-                  </p>
+                  <div className="flex items-center gap-2.5">
+                    <SmartImage
+                      src={pendingSpontaneous.photoUrl}
+                      alt="Foto del repartidor y paquete en la puerta"
+                      className="w-14 h-14 rounded object-cover border border-warning/50 shrink-0"
+                      fallbackIcon="inventory_2"
+                      fallbackLabel="Foto paquete"
+                    />
+                    <div className="min-w-0">
+                      <p className="font-label text-label-md text-on-surface leading-tight">
+                        {pendingSpontaneous.carrier} · Apto {pendingSpontaneous.unit}
+                      </p>
+                      <p className="font-body text-body-sm text-on-warning-container">
+                        {pendingSpontaneous.detectedLabel}
+                      </p>
+                    </div>
+                  </div>
                   <div className="grid grid-cols-2 gap-2">
                     <button
                       type="button"
                       onClick={() => {
                         onRespondSpontaneousParcel('authorize');
-                        showFeedback('Autorizado depósito en zona segura con foto');
+                        showFeedback('Hall/zaguán abierto · comprobante enviado (delivered)');
                       }}
-                      className="py-1.5 rounded bg-primary text-on-primary font-label text-label-sm cursor-pointer"
+                      className="py-2 rounded bg-primary text-on-primary font-label text-label-sm cursor-pointer"
                     >
-                      Dejar en Zaguán
+                      Dejar pasar al hall
                     </button>
                     <button
                       type="button"
@@ -555,7 +586,7 @@ export function AppResidenteView({
                         onRespondSpontaneousParcel('reject');
                         showFeedback('Entrega rechazada');
                       }}
-                      className="py-1.5 rounded bg-surface-container-lowest border border-outline-variant text-on-surface font-label text-label-sm cursor-pointer"
+                      className="py-2 rounded bg-surface-container-lowest border border-outline-variant text-error font-label text-label-sm cursor-pointer"
                     >
                       Rechazar
                     </button>
@@ -1397,14 +1428,15 @@ export function AppResidenteView({
                   >
                     <div className="flex items-center justify-between">
                       <h2 className="font-title text-label-lg text-on-surface">
-                        Pre-autorizar envío (OCR sin molestias)
+                        Espero un paquete
                       </h2>
                       <span className="font-mono text-mono-sm text-primary bg-surface-variant px-2 py-0.5 rounded-sm">
-                        OCR IA
+                        Visión OCR IA
                       </span>
                     </div>
                     <div className="grid grid-cols-2 gap-2">
                       <select
+                        aria-label="Empresa o correo"
                         value={preAuthCarrier}
                         onChange={(e) => setPreAuthCarrier(e.target.value)}
                         className="rounded border border-outline-variant bg-surface px-2 py-1.5 font-body text-body-sm"
@@ -1413,29 +1445,114 @@ export function AppResidenteView({
                         <option value="PedidosYa">PedidosYa</option>
                         <option value="DAC">DAC Agencia Central</option>
                         <option value="Correo Uruguayo">Correo Uruguayo</option>
+                        <option value="Amazon / Courier">Amazon / Courier</option>
                       </select>
                       <select
+                        aria-label="Ventana de tiempo esperada"
+                        value={preAuthWindow}
+                        onChange={(e) => setPreAuthWindow(e.target.value)}
+                        className="rounded border border-outline-variant bg-surface px-2 py-1.5 font-body text-body-sm"
+                      >
+                        <option value="Hoy 09:00–13:00">Hoy 09:00–13:00</option>
+                        <option value="Hoy 13:00–18:00">Hoy 13:00–18:00</option>
+                        <option value="Hoy 18:00–22:00">Hoy 18:00–22:00</option>
+                        <option value="Hoy 09:00–18:00">Todo el día</option>
+                      </select>
+                    </div>
+                    <div className="grid grid-cols-3 gap-2">
+                      <input
+                        type="text"
+                        value={preAuthDesc}
+                        onChange={(e) => setPreAuthDesc(e.target.value)}
+                        placeholder="Remitente o detalle (ej. Full)"
+                        className="col-span-2 rounded border border-outline-variant bg-surface px-2.5 py-1.5 font-body text-body-sm"
+                      />
+                      <select
+                        aria-label="Zona de depósito"
                         value={preAuthMode}
                         onChange={(e) => setPreAuthMode(e.target.value as ParcelStorageMode)}
                         className="rounded border border-outline-variant bg-surface px-2 py-1.5 font-body text-body-sm"
                       >
-                        <option value="zaguan">Zona Zaguán</option>
-                        <option value="locker">Locker Inteligente</option>
+                        <option value="zaguan">Zaguán</option>
+                        <option value="locker">Locker</option>
                       </select>
                     </div>
-                    <input
-                      type="text"
-                      value={preAuthDesc}
-                      onChange={(e) => setPreAuthDesc(e.target.value)}
-                      placeholder="Ej. Pedido Mercado Libre Full hoy..."
-                      className="rounded border border-outline-variant bg-surface px-2.5 py-1.5 font-body text-body-sm"
-                    />
+
+                    {/* Per-package automatic rule selector */}
+                    <div className="flex flex-col gap-1.5 pt-0.5">
+                      <span className="font-label text-[11px] text-on-surface-variant">
+                        Regla automática al validar la etiqueta:
+                      </span>
+                      <label className="flex items-start gap-2 p-2 rounded bg-surface-container-low border border-outline-variant cursor-pointer">
+                        <input
+                          type="radio"
+                          name="preauth-rule"
+                          checked={preAuthAutoRule === 'auto_open_after_ocr'}
+                          onChange={() => setPreAuthAutoRule('auto_open_after_ocr')}
+                          className="mt-0.5 accent-primary"
+                        />
+                        <span className="font-body text-body-sm text-on-surface">
+                          <strong>Abrir zaguán automáticamente</strong> tras validar etiqueta
+                        </span>
+                      </label>
+                      <label className="flex items-start gap-2 p-2 rounded bg-surface-container-low border border-outline-variant cursor-pointer">
+                        <input
+                          type="radio"
+                          name="preauth-rule"
+                          checked={preAuthAutoRule === 'ask_confirmation_photo'}
+                          onChange={() => setPreAuthAutoRule('ask_confirmation_photo')}
+                          className="mt-0.5 accent-primary"
+                        />
+                        <span className="font-body text-body-sm text-on-surface">
+                          <strong>Pedirme confirmación con foto</strong> antes de abrir
+                        </span>
+                      </label>
+                    </div>
+
                     <button
                       type="submit"
                       className="w-full py-2 rounded bg-primary text-on-primary font-label text-label-md cursor-pointer"
                     >
-                      Cargar &ldquo;Espero paquete hoy&rdquo;
+                      Registrar entrega esperada
                     </button>
+
+                    {/* List of pre-authorized packages for Apto 4B */}
+                    {preAuthParcels.filter((p) => p.unit === BUILDING_INFO.activeUnit).length > 0 && (
+                      <div className="pt-2 border-t border-outline-variant flex flex-col gap-1.5">
+                        <span className="font-label text-label-sm text-secondary">
+                          Mis entregas pre-autorizadas (Apto {BUILDING_INFO.activeUnit}):
+                        </span>
+                        {preAuthParcels
+                          .filter((p) => p.unit === BUILDING_INFO.activeUnit)
+                          .slice(0, 4)
+                          .map((pa) => (
+                            <div
+                              key={pa.id}
+                              className="p-2 rounded bg-surface-container-low border border-outline-variant flex items-center justify-between gap-2"
+                            >
+                              <div className="min-w-0">
+                                <p className="font-label text-label-sm text-on-surface truncate">
+                                  {pa.carrier} · {pa.timeWindowLabel}
+                                </p>
+                                <p className="font-body text-[11px] text-on-surface-variant truncate">
+                                  {pa.autoRule === 'auto_open_after_ocr'
+                                    ? 'Auto-abrir zaguán tras OCR'
+                                    : 'Pedir confirmación con foto'}
+                                </p>
+                              </div>
+                              <span
+                                className={`font-mono text-[10px] px-1.5 py-0.5 rounded-sm shrink-0 ${
+                                  pa.status === 'delivered'
+                                    ? 'bg-success-container text-on-success-container'
+                                    : 'bg-surface-variant text-primary'
+                                }`}
+                              >
+                                {pa.status === 'delivered' ? 'delivered' : 'Esperando'}
+                              </span>
+                            </div>
+                          ))}
+                      </div>
+                    )}
                   </form>
 
                   <section className="bg-surface-container-lowest border border-outline-variant rounded-md p-3.5 flex flex-col gap-2">

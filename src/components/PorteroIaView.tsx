@@ -1,6 +1,7 @@
-import { FormEvent, useEffect, useState } from 'react';
+import { ChangeEvent, FormEvent, useEffect, useState } from 'react';
 import { ASSETS, BUILDING_INFO } from '../data/zaguanData';
 import { buildAkuvoxRtspUrl } from '../services/akuvoxService';
+import { ParcelValidationDecision } from '../services/parcelVisionService';
 import {
   AkuvoxConfig,
   AkuvoxLogEntry,
@@ -57,6 +58,12 @@ interface PorteroIaViewProps {
   ) => void;
   onRespondVisit: (approved: boolean) => void;
   onCompletePreAuthParcel: (preAuthId: string, storageMode: ParcelStorageMode) => void;
+  onValidateParcelVisionFrame: (params: {
+    imageBase64?: string;
+    mimeType?: string;
+    previewPhotoUrl?: string;
+    simulatedLabelText?: string;
+  }) => Promise<ParcelValidationDecision>;
   onStartSpontaneousParcel: (carrier: string, unit: string, storageMode: ParcelStorageMode) => void;
   onRespondSpontaneousParcel: (action: 'authorize' | 'reject' | 'timeout-auto') => void;
   onValidatePinOrQr: (
@@ -113,6 +120,7 @@ export function PorteroIaView({
   onRequestVisitApproval,
   onRespondVisit,
   onCompletePreAuthParcel,
+  onValidateParcelVisionFrame,
   onStartSpontaneousParcel,
   onRespondSpontaneousParcel,
   onValidatePinOrQr,
@@ -133,10 +141,14 @@ export function PorteroIaView({
   const [pinFeedback, setPinFeedback] = useState<{ ok: boolean; text: string } | null>(null);
   const [simScheduleSlot, setSimScheduleSlot] = useState<'allowed' | 'blocked'>('allowed');
 
-  // OCR pre-auth parcel step
+  // OCR pre-auth parcel step + Multimodal Vision frame analysis
   const [matchedPreAuth, setMatchedPreAuth] = useState<PreAuthorizedParcel | null>(null);
   const [ocrPhase, setOcrPhase] = useState<'awaiting-label' | 'scanning' | 'deposited'>(
     'awaiting-label'
+  );
+  const [visionScanning, setVisionScanning] = useState(false);
+  const [lastVisionDecision, setLastVisionDecision] = useState<ParcelValidationDecision | null>(
+    null
   );
 
   // Loitering detector state
@@ -394,7 +406,7 @@ export function PorteroIaView({
     if (hardwareModel === 'akuvox-e12w') {
       onLogAkuvoxProtocol(
         'rtsp',
-        `GET http://${akuvoxConfig.deviceIp}:8080/picture.jpg → OCR IA`,
+        `POST /api/packages/validate-frame (Snapshot E12W → Gemini Vision)`,
         `Leyendo etiqueta ${matchedPreAuth.carrier} · Apto ${matchedPreAuth.unit}`,
         akuvoxConfig.enabled ? 'ok' : 'simulated'
       );
@@ -405,9 +417,47 @@ export function PorteroIaView({
       const zoneText =
         storageMode === 'locker'
           ? 'Se abrió el Locker inteligente #B2. Depositá el paquete y cerrá la compuerta.'
-          : 'Se desbloqueó el Relé 1 (Zaguán de paquetería). La puerta al hall permanece bloqueada. Foto enviada al residente.';
+          : 'Se desbloqueó el Relé 1 (Zaguán de paquetería). La puerta al hall permanece bloqueada. Foto comprobante enviada al residente.';
       speakText(zoneText);
     }, 850);
+  };
+
+  const runMultimodalFrameScan = async (params: {
+    imageBase64?: string;
+    mimeType?: string;
+    previewPhotoUrl?: string;
+    simulatedLabelText?: string;
+  }) => {
+    setVisionScanning(true);
+    onLogAkuvoxProtocol(
+      'rtsp',
+      'POST /api/packages/validate-frame (Akuvox E12W → Visión Multimodal)',
+      params.imageBase64
+        ? 'Analizando foto real de etiqueta con Gemini 2.5 Flash Vision'
+        : `Analizando etiqueta: "${params.simulatedLabelText}"`,
+      akuvoxConfig.enabled ? 'ok' : 'simulated'
+    );
+    const decision = await onValidateParcelVisionFrame(params);
+    setLastVisionDecision(decision);
+    setVisionScanning(false);
+    pushBubble('ia', decision.message);
+  };
+
+  const handleLabelFileUpload = (e: ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      const dataUrl = typeof reader.result === 'string' ? reader.result : '';
+      if (!dataUrl) return;
+      void runMultimodalFrameScan({
+        imageBase64: dataUrl,
+        mimeType: file.type || 'image/jpeg',
+        previewPhotoUrl: dataUrl,
+      });
+    };
+    reader.readAsDataURL(file);
+    e.target.value = '';
   };
 
   const activeNotice = intercomNotices[noticeIdx] ?? intercomNotices[0];
@@ -1458,11 +1508,11 @@ export function PorteroIaView({
                       type="button"
                       onClick={() => {
                         onRespondSpontaneousParcel('authorize');
-                        pushBubble('ia', 'Residente autorizó. Relé 1 abierto y foto enviada.');
+                        pushBubble('ia', 'Residente autorizó pasar al hall/zaguán. Relé 1 abierto y foto comprobante enviada.');
                       }}
                       className="py-2 px-2 rounded bg-primary text-on-primary font-label text-label-sm cursor-pointer"
                     >
-                      Autorizar
+                      Dejar pasar al hall
                     </button>
                     <button
                       type="button"
@@ -1500,6 +1550,131 @@ export function PorteroIaView({
                     paquete para ver el snapshot 1080p y los botones rápidos aquí mismo.
                   </div>
                 )}
+            </div>
+
+            {/* 2.5 Validación Inteligente de Paquetería (Snapshot E12W + Visión Multimodal OCR) */}
+            <div className="bg-surface-container-lowest border border-outline-variant rounded-md p-5 flex flex-col gap-3">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div className="flex items-center gap-2">
+                  <span className="material-symbols-outlined text-primary" aria-hidden="true">
+                    document_scanner
+                  </span>
+                  <h2 className="font-headline text-title-lg text-on-surface">
+                    Validación de Paquetería por Visión IA (OCR)
+                  </h2>
+                </div>
+                <label className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded bg-surface-container-low border border-outline-variant font-label text-label-sm text-primary hover:bg-surface-container cursor-pointer">
+                  <span className="material-symbols-outlined text-sm" aria-hidden="true">
+                    upload_file
+                  </span>
+                  <span>Subir foto de etiqueta</span>
+                  <input
+                    type="file"
+                    accept="image/*"
+                    onChange={handleLabelFileUpload}
+                    className="sr-only"
+                  />
+                </label>
+              </div>
+              <p className="font-body text-body-sm text-on-surface-variant">
+                Envía un frame de cámara al endpoint <code>/api/packages/validate-frame</code>{' '}
+                (Gemini 2.5 Flash), extrae unidad/destinatario y cruza con pre-autorizaciones.
+              </p>
+
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                <button
+                  type="button"
+                  disabled={visionScanning}
+                  onClick={() =>
+                    void runMultimodalFrameScan({
+                      simulatedLabelText:
+                        'MERCADO LIBRE FULL · Destinatario: Martín Silva · Apto 4B · #ML-9042',
+                    })
+                  }
+                  className="p-2.5 rounded bg-success-container/60 hover:bg-success-container border border-success/40 text-left cursor-pointer disabled:opacity-60"
+                >
+                  <span className="font-label text-label-sm text-on-success-container block">
+                    1. ML Apto 4B
+                  </span>
+                  <span className="font-body text-[11px] text-on-surface-variant">
+                    Auto-abrir + delivered
+                  </span>
+                </button>
+
+                <button
+                  type="button"
+                  disabled={visionScanning}
+                  onClick={() =>
+                    void runMultimodalFrameScan({
+                      simulatedLabelText:
+                        'PEDIDOSYA MARKET · Martín Silva · Apto 4B · #PY-2210',
+                    })
+                  }
+                  className="p-2.5 rounded bg-warning-container/60 hover:bg-warning-container border border-warning/40 text-left cursor-pointer disabled:opacity-60"
+                >
+                  <span className="font-label text-label-sm text-on-warning-container block">
+                    2. PedidosYa 4B
+                  </span>
+                  <span className="font-body text-[11px] text-on-surface-variant">
+                    Regla confirmar con foto
+                  </span>
+                </button>
+
+                <button
+                  type="button"
+                  disabled={visionScanning}
+                  onClick={() =>
+                    void runMultimodalFrameScan({
+                      simulatedLabelText:
+                        'DAC AGENCIA CENTRAL · Destinatario: Martín Silva · Apto 4B · #DAC-778',
+                    })
+                  }
+                  className="p-2.5 rounded bg-surface-container-low hover:bg-surface-container border border-outline-variant text-left cursor-pointer disabled:opacity-60"
+                >
+                  <span className="font-label text-label-sm text-on-surface block">
+                    3. DAC sin aviso
+                  </span>
+                  <span className="font-body text-[11px] text-on-surface-variant">
+                    Alerta foto al residente
+                  </span>
+                </button>
+              </div>
+
+              {visionScanning && (
+                <div className="p-3 rounded bg-surface-container-low border border-primary/40 font-mono text-mono-sm text-primary">
+                  Analizando frame de cámara E12W con modelo de visión multimodal...
+                </div>
+              )}
+
+              {lastVisionDecision && !visionScanning && (
+                <div className="p-3 rounded bg-surface-container-low border border-outline-variant flex flex-col gap-1.5">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <span className="font-mono text-[11px] text-primary">
+                      MOTOR: {lastVisionDecision.extraction.engine} · CONFIANZA{' '}
+                      {Math.round(lastVisionDecision.extraction.confidence * 100)}%
+                    </span>
+                    <span
+                      className={`px-2 py-0.5 rounded-sm font-label text-[11px] ${
+                        lastVisionDecision.outcome === 'auto_opened_delivered'
+                          ? 'bg-success-container text-on-success-container'
+                          : 'bg-warning-container text-on-warning-container'
+                      }`}
+                    >
+                      {lastVisionDecision.outcome === 'auto_opened_delivered'
+                        ? 'OPENED → DELIVERED'
+                        : 'CONFIRMATION SENT'}
+                    </span>
+                  </div>
+                  <p className="font-mono text-[11px] text-on-surface">
+                    OCR: Unidad <strong>{lastVisionDecision.extraction.unitNumber || '—'}</strong> ·
+                    Destinatario <strong>{lastVisionDecision.extraction.recipientName || '—'}</strong>{' '}
+                    · Correo <strong>{lastVisionDecision.extraction.carrier || '—'}</strong>
+                  </p>
+                  <p className="font-body text-body-sm text-on-surface-variant">
+                    {lastVisionDecision.message}
+                  </p>
+                </div>
+              )}
             </div>
 
             {/* 3. Detección de Merodeo vía RTSP ONVIF del E12W */}

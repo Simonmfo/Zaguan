@@ -1,3 +1,4 @@
+import { GoogleGenAI } from '@google/genai';
 import express from 'express';
 
 /**
@@ -457,6 +458,160 @@ app.post('/api/pase/:token/open', (req, res) => {
     distanceMeters: distance,
     burned: pass.passType === 'one_time',
     message: 'Puerta abierta. Bienvenido al edificio.',
+  });
+});
+
+// ============================================================================
+// 9. Validación Inteligente de Paquetería (Snapshot Akuvox E12W + Visión IA)
+// ============================================================================
+interface BackendExpectedPackage {
+  id: string;
+  unit: string;
+  residentName: string;
+  carrier: string;
+  description: string;
+  timeWindowLabel: string;
+  autoRule: 'auto_open_after_ocr' | 'ask_confirmation_photo';
+  storageMode: 'zaguan' | 'locker';
+  status: 'expected' | 'delivered';
+}
+
+const expectedPackageStore: BackendExpectedPackage[] = [];
+
+app.post('/api/packages/preauthorize', (req, res) => {
+  const b = req.body ?? {};
+  const item: BackendExpectedPackage = {
+    id: String(b.id || `pkg-${Date.now()}`),
+    unit: String(b.unit || '4B').toUpperCase(),
+    residentName: String(b.residentName || 'Martín Silva'),
+    carrier: String(b.carrier || 'Mercado Libre'),
+    description: String(b.description || ''),
+    timeWindowLabel: String(b.timeWindowLabel || 'Hoy 08:00–22:00'),
+    autoRule:
+      b.autoRule === 'ask_confirmation_photo' ? 'ask_confirmation_photo' : 'auto_open_after_ocr',
+    storageMode: b.storageMode === 'locker' ? 'locker' : 'zaguan',
+    status: 'expected',
+  };
+  expectedPackageStore.unshift(item);
+  res.json({ ok: true, package: item });
+});
+
+app.post('/api/packages/validate-frame', async (req, res) => {
+  const {
+    imageBase64,
+    mimeType = 'image/jpeg',
+    simulatedLabelText,
+    akuvoxDeviceIp,
+    akuvoxUser = 'admin',
+    akuvoxPassword = '',
+  } = req.body ?? {};
+
+  let frameBase64: string | null =
+    typeof imageBase64 === 'string' && imageBase64.length > 32
+      ? imageBase64.replace(/^data:[^;]+;base64,/, '')
+      : null;
+
+  // Si no se envió frame pero sí IP del Akuvox E12W, capturar snapshot 1080p en vivo
+  if (!frameBase64 && akuvoxDeviceIp) {
+    try {
+      const auth = `Basic ${Buffer.from(`${akuvoxUser}:${akuvoxPassword}`).toString('base64')}`;
+      const snap = await fetch(`http://${akuvoxDeviceIp}:8080/picture.jpg`, {
+        headers: { Authorization: auth },
+        signal: AbortSignal.timeout(4000),
+      });
+      if (snap.ok) {
+        frameBase64 = Buffer.from(await snap.arrayBuffer()).toString('base64');
+      }
+    } catch {
+      // Continuar con fallback si el E12W no es alcanzable
+    }
+  }
+
+  // Visión multimodal real con Gemini 2.5 Flash cuando hay GEMINI_API_KEY + frame de cámara
+  const apiKey = process.env.GEMINI_API_KEY;
+  if (apiKey && frameBase64) {
+    try {
+      const ai = new GoogleGenAI({ apiKey });
+      const response = await ai.models.generateContent({
+        model: 'gemini-2.5-flash',
+        contents: [
+          {
+            inlineData: {
+              mimeType: String(mimeType),
+              data: frameBase64,
+            },
+          },
+          {
+            text: [
+              'Sos el módulo de visión OCR de Zaguán (portero inteligente en Montevideo, Uruguay).',
+              'Analizá esta captura de cámara de la entrada y extraé los datos de la etiqueta del paquete o bolsa de envío.',
+              'Devolvé ÚNICAMENTE un JSON válido con las claves exactas:',
+              '{ "isPackageVisible": boolean, "unitNumber": string | null, "recipientName": string | null, "carrier": string | null, "trackingCode": string | null, "confidence": number (0 a 1), "rawLabelText": string }.',
+              'Ejemplo de unitNumber: "4B", "3A", "101". Si no se distingue un paquete o etiqueta legible, devolvé isPackageVisible: false.',
+            ].join(' '),
+          },
+        ],
+        config: {
+          responseMimeType: 'application/json',
+        },
+      });
+
+      const parsed = JSON.parse(response.text || '{}') as Record<string, unknown>;
+      const extraction = {
+        isPackageVisible: Boolean(parsed.isPackageVisible),
+        unitNumber: parsed.unitNumber ? String(parsed.unitNumber).toUpperCase() : undefined,
+        recipientName: parsed.recipientName ? String(parsed.recipientName) : undefined,
+        carrier: parsed.carrier ? String(parsed.carrier) : undefined,
+        trackingCode: parsed.trackingCode ? String(parsed.trackingCode) : undefined,
+        confidence: typeof parsed.confidence === 'number' ? parsed.confidence : 0.9,
+        rawLabelText: String(parsed.rawLabelText || ''),
+        engine: 'gemini-2.5-flash' as const,
+      };
+      recordEvent('qr_scan', {
+        method: 'gemini_vision_ocr',
+        unit: extraction.unitNumber || 'unknown',
+        carrier: extraction.carrier || 'unknown',
+      });
+      res.json({ ok: true, extraction });
+      return;
+    } catch (err) {
+      console.error('[Vision OCR] Error llamando a Gemini:', err);
+    }
+  }
+
+  // Fallback estructurado cuando no hay GEMINI_API_KEY configurada
+  const raw = String(
+    simulatedLabelText || 'MERCADO LIBRE FULL · Martín Silva · Apto 4B · #ML-402'
+  );
+  const unitMatch = raw.match(/\b([1-9][a-dA-D]|[1-9]\d{2})\b/);
+  const trackingMatch = raw.match(/#?([A-Z]{2,4}-?\d{3,8})/i);
+  const lower = raw.toLowerCase();
+  const carrier = lower.includes('mercado')
+    ? 'Mercado Libre'
+    : lower.includes('pedidos')
+      ? 'PedidosYa'
+      : lower.includes('dac')
+        ? 'DAC Agencia Central'
+        : lower.includes('correo')
+          ? 'Correo Uruguayo'
+          : 'Mensajería';
+
+  res.json({
+    ok: true,
+    extraction: {
+      isPackageVisible: true,
+      unitNumber: unitMatch ? unitMatch[1].toUpperCase() : '4B',
+      recipientName: lower.includes('carolina')
+        ? 'Carolina Vega'
+        : lower.includes('roberto')
+          ? 'Roberto Pereyra'
+          : 'Martín Silva',
+      carrier,
+      trackingCode: trackingMatch ? `#${trackingMatch[1].toUpperCase()}` : '#PKG-402',
+      confidence: 0.96,
+      rawLabelText: raw,
+      engine: 'ocr-local-fallback',
+    },
   });
 });
 

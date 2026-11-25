@@ -105,6 +105,19 @@ export type ParcelStorageMode = 'zaguan' | 'locker';
 
 export type UnannouncedParcelRule = 'auto-zaguan' | 'reject';
 
+export type PreAuthParcelRule = 'auto_open_after_ocr' | 'ask_confirmation_photo';
+
+export interface ParcelOcrExtraction {
+  isPackageVisible: boolean;
+  unitNumber?: string;
+  recipientName?: string;
+  carrier?: string;
+  trackingCode?: string;
+  confidence: number;
+  rawLabelText: string;
+  engine: 'gemini-2.5-flash' | 'ocr-local-fallback';
+}
+
 export interface BrandCompatibilityInfo {
   key: RetrofitBrandKey;
   tabLabel: string;
@@ -163,9 +176,11 @@ export interface PreAuthorizedParcel {
   residentName: string;
   carrier: string;
   description: string;
+  timeWindowLabel: string;
+  autoRule: PreAuthParcelRule;
   storageMode: ParcelStorageMode;
   createdAt: string;
-  status: 'Esperando' | 'Entregado';
+  status: 'Esperando' | 'delivered';
 }
 
 export interface ParcelItem {
@@ -176,11 +191,18 @@ export interface ParcelItem {
   receivedAt: string;
   location: string;
   storageMode: ParcelStorageMode;
-  validationMethod: 'Pre-autorizado (OCR IA)' | 'Autorización residente' | 'Regla automática 20s' | 'Monitoreo 24/7';
+  validationMethod:
+    | 'Pre-autorizado (OCR Visión IA)'
+    | 'Pre-autorizado (OCR IA)'
+    | 'Confirmado con foto por residente'
+    | 'Autorización residente'
+    | 'Regla automática 20s'
+    | 'Monitoreo 24/7';
   note: string;
-  status: 'Para retirar' | 'Retirado';
+  status: 'delivered' | 'Para retirar' | 'Retirado';
   imageUrl?: string;
   authorizedPin?: string;
+  ocrSummary?: string;
 }
 
 export interface ActivityEvent {

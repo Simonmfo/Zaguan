@@ -13,12 +13,18 @@ import {
   triggerAkuvoxDoor,
 } from './services/akuvoxService';
 import {
+  ParcelValidationDecision,
+  validateParcelCameraFrame,
+} from './services/parcelVisionService';
+import {
   deactivateTenantInSupabase,
   revokePassInSupabase,
   subscribeToAccessLogsRealtime,
   syncAccessLogToSupabase,
+  syncDeliveredPackageToSupabase,
   syncMasterKeyToSupabase,
   syncNoticeToSupabase,
+  syncPreAuthPackageToSupabase,
   syncRecurringPassToSupabase,
   syncSingleUsePassToSupabase,
   syncTenantToSupabase,
@@ -64,6 +70,7 @@ import {
   ParcelStorageMode,
   PendingSpontaneousParcel,
   PendingVisitRequest,
+  PreAuthParcelRule,
   PreAuthorizedParcel,
   QrPass,
   RecurringPass,
@@ -424,19 +431,23 @@ export default function App() {
         storageMode: mode,
         validationMethod,
         note: `${validationMethod}. Foto comprobante enviada al residente ("Tu paquete ya está en ${mode === 'locker' ? 'el Locker #B2' : 'el zaguán'} · ${time} hs"). Puerta a ascensores bloqueada.`,
-        status: 'Para retirar',
+        status: 'delivered',
         imageUrl: ASSETS.parcelReception,
       };
 
       setParcels((prev) => [newParcel, ...prev]);
+      const matchedUnit = units.find(
+        (u) => u.buildingId === activeBuildingId && u.unitNumber.toUpperCase() === unit.toUpperCase()
+      );
+      void syncDeliveredPackageToSupabase(activeBuildingId, matchedUnit?.id, newParcel);
       handleLogActivity({
-        title: `Tu paquete ${shortCode} ya está en ${mode === 'locker' ? 'Locker #B2' : 'el zaguán'}`,
+        title: `Paquete ${shortCode} entregado (delivered) en ${mode === 'locker' ? 'Locker #B2' : 'el zaguán'}`,
         subtitle: `${carrier} · ${validationMethod} · Comprobante con foto enviado · Apto ${unit}`,
         time,
         category: 'paquete',
       });
     },
-    [dispatchHardwareRelay, handleLogActivity, nowTime]
+    [activeBuildingId, dispatchHardwareRelay, handleLogActivity, nowTime, units]
   );
 
   // Live 20s countdown for spontaneous parcel
@@ -708,7 +719,9 @@ export default function App() {
   const handleCreatePreAuthParcel = (
     carrier: string,
     description: string,
-    mode: ParcelStorageMode
+    mode: ParcelStorageMode,
+    timeWindowLabel: string,
+    autoRule: PreAuthParcelRule
   ) => {
     const item: PreAuthorizedParcel = {
       id: `pre-${Date.now()}`,
@@ -716,14 +729,29 @@ export default function App() {
       residentName: BUILDING_INFO.activeResident,
       carrier,
       description,
+      timeWindowLabel,
+      autoRule,
       storageMode: mode,
       createdAt: `Hoy ${nowTime()}`,
       status: 'Esperando',
     };
     setPreAuthParcels((prev) => [item, ...prev]);
+    const matchedUnit = units.find(
+      (u) => u.buildingId === activeBuildingId && u.unitNumber === BUILDING_INFO.activeUnit
+    );
+    void syncPreAuthPackageToSupabase(activeBuildingId, matchedUnit?.id, item);
+    fetch('/api/packages/preauthorize', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(item),
+    }).catch(() => {});
     handleLogActivity({
-      title: `Pre-autorización cargada: ${carrier}`,
-      subtitle: `OCR sin molestias · Destino: ${mode === 'locker' ? 'Locker' : 'Zaguán'} · Apto 4B`,
+      title: `Pre-autorización cargada: ${carrier} (${timeWindowLabel})`,
+      subtitle: `${
+        autoRule === 'auto_open_after_ocr'
+          ? 'Abrir zaguán auto tras OCR'
+          : 'Pedir confirmación con foto'
+      } · Apto ${BUILDING_INFO.activeUnit}`,
       time: nowTime(),
       category: 'paquete',
     });
@@ -733,9 +761,64 @@ export default function App() {
     const found = preAuthParcels.find((p) => p.id === preAuthId);
     if (!found) return;
     setPreAuthParcels((prev) =>
-      prev.map((p) => (p.id === preAuthId ? { ...p, status: 'Entregado' } : p))
+      prev.map((p) => (p.id === preAuthId ? { ...p, status: 'delivered' } : p))
     );
-    completeParcelDeposit(found.carrier, found.unit, mode, 'Pre-autorizado (OCR IA)');
+    completeParcelDeposit(found.carrier, found.unit, mode, 'Pre-autorizado (OCR Visión IA)');
+  };
+
+  const handleValidateParcelVisionFrame = async (params: {
+    imageBase64?: string;
+    mimeType?: string;
+    previewPhotoUrl?: string;
+    simulatedLabelText?: string;
+  }): Promise<ParcelValidationDecision> => {
+    const decision = await validateParcelCameraFrame({
+      ...params,
+      akuvoxDeviceIp: akuvoxConfig.enabled ? akuvoxConfig.deviceIp : undefined,
+      preAuthParcels,
+      tenants,
+    });
+
+    if (decision.outcome === 'auto_opened_delivered' && decision.matchedPreAuth) {
+      const targetPreAuth = decision.matchedPreAuth;
+      setPreAuthParcels((prev) =>
+        prev.map((p) => (p.id === targetPreAuth.id ? { ...p, status: 'delivered' } : p))
+      );
+      completeParcelDeposit(
+        decision.extraction.carrier || targetPreAuth.carrier,
+        decision.matchedUnit || targetPreAuth.unit,
+        targetPreAuth.storageMode,
+        'Pre-autorizado (OCR Visión IA)'
+      );
+    } else if (decision.outcome === 'needs_resident_confirmation') {
+      const unit = decision.matchedUnit || BUILDING_INFO.activeUnit;
+      const carrier = decision.extraction.carrier || 'Envío / Correo';
+      setPendingSpontaneous({
+        id: `spon-${Date.now()}`,
+        carrier,
+        unit,
+        residentName: decision.matchedResidentName || BUILDING_INFO.activeResident,
+        detectedLabel: `OCR (${Math.round(decision.extraction.confidence * 100)}%): ${
+          decision.extraction.recipientName || 'Destinatario'
+        } · ${decision.extraction.trackingCode || carrier}`,
+        storageMode,
+        secondsLeft: 20,
+        status: 'Esperando',
+        photoUrl: decision.proofPhotoUrl,
+      });
+      handleLogActivity({
+        title: `Confirmación con foto enviada (${carrier})`,
+        subtitle: `Apto ${unit} · ${
+          decision.matchedPreAuth
+            ? 'Regla pre-autorizada requiere confirmación'
+            : 'Paquete no pre-autorizado'
+        }`,
+        time: nowTime(),
+        category: 'paquete',
+      });
+    }
+
+    return decision;
   };
 
   const handleStartSpontaneousParcel = (
@@ -1313,6 +1396,7 @@ export default function App() {
           onRequestVisitApproval={handleRequestVisitApproval}
           onRespondVisit={handleRespondVisit}
           onCompletePreAuthParcel={handleCompletePreAuthParcel}
+          onValidateParcelVisionFrame={handleValidateParcelVisionFrame}
           onStartSpontaneousParcel={handleStartSpontaneousParcel}
           onRespondSpontaneousParcel={handleRespondSpontaneousParcel}
           onValidatePinOrQr={handleValidatePinOrQr}

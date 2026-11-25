@@ -8,6 +8,8 @@ import {
   BuildingTenant,
   BuildingUnit,
   MasterKeyRecord,
+  ParcelItem,
+  PreAuthorizedParcel,
   QrPass,
   RecurringPass,
   UserRole,
@@ -190,6 +192,48 @@ export async function revokePassInSupabase(qrOrPin: string): Promise<void> {
     .from('access_passes')
     .update({ status: 'revoked', revoked_at: new Date().toISOString() })
     .or(`qr_token.eq.${qrOrPin},pin_code.eq.${qrOrPin}`);
+}
+
+export async function syncPreAuthPackageToSupabase(
+  buildingId: string,
+  unitId: string | undefined,
+  parcel: PreAuthorizedParcel
+): Promise<void> {
+  const client = getSupabaseClient();
+  if (!client || !unitId) return;
+  await client.from('packages').insert({
+    building_id: buildingId,
+    unit_id: unitId,
+    tracking_code: `EXP-${Date.now().toString().slice(-4)}`,
+    carrier: parcel.carrier,
+    description: parcel.description,
+    time_window_label: parcel.timeWindowLabel,
+    auto_rule: parcel.autoRule,
+    status: 'expected',
+    storage_mode: parcel.storageMode,
+  });
+}
+
+export async function syncDeliveredPackageToSupabase(
+  buildingId: string,
+  unitId: string | undefined,
+  parcel: ParcelItem
+): Promise<void> {
+  const client = getSupabaseClient();
+  if (!client || !unitId) return;
+  await client.from('packages').insert({
+    building_id: buildingId,
+    unit_id: unitId,
+    tracking_code: parcel.code,
+    carrier: parcel.carrier,
+    description: parcel.note,
+    status: 'delivered',
+    storage_mode: parcel.storageMode,
+    storage_location: parcel.location,
+    validation_method: parcel.validationMethod,
+    proof_photo_url: parcel.imageUrl || null,
+    delivered_at: new Date().toISOString(),
+  });
 }
 
 export async function syncNoticeToSupabase(
