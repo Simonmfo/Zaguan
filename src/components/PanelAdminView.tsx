@@ -20,6 +20,7 @@ import {
   BuildingUnit,
   MainScreen,
   MasterKeyRecord,
+  RecurringPass,
   SecurityAlert,
   UserRole,
 } from '../types/zaguan';
@@ -41,6 +42,7 @@ interface PanelAdminViewProps {
   onTestAkuvoxDoorRelay: () => Promise<void>;
   onUpdateLiveSnapshot: (url: string | null) => void;
   tenants: BuildingTenant[];
+  recurringPasses: RecurringPass[];
   masterKeys: MasterKeyRecord[];
   notices: BuildingNotice[];
   securityAlerts: SecurityAlert[];
@@ -101,6 +103,7 @@ export function PanelAdminView({
   onTestAkuvoxDoorRelay,
   onUpdateLiveSnapshot,
   tenants,
+  recurringPasses,
   masterKeys,
   notices,
   securityAlerts,
@@ -1239,7 +1242,9 @@ export function PanelAdminView({
 
             {/* Akuvox E12W Config Panel */}
             <AkuvoxConfigPanel
+              buildingId={activeBuildingId}
               config={akuvoxConfig}
+              recurringPasses={recurringPasses}
               onChangeConfig={onChangeAkuvoxConfig}
               onTestDoorRelay={onTestAkuvoxDoorRelay}
               onUpdateLiveSnapshot={onUpdateLiveSnapshot}

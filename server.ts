@@ -1,5 +1,17 @@
+import 'dotenv/config';
 import { GoogleGenAI } from '@google/genai';
 import express from 'express';
+import {
+  getSnapshot,
+  isAkuvoxMockMode,
+  openDoor,
+  syncRfidCards,
+  type RfidCardSyncItem,
+} from './server/services/akuvoxController';
+import {
+  handleConciergeUtterance,
+  ZAGUAN_CONCIERGE_SYSTEM_PROMPT,
+} from './server/services/aiConciergeOrchestrator';
 
 /**
  * Zaguán Digital — Puente Hardware Local para Akuvox E12W
@@ -49,9 +61,10 @@ function recordEvent(event: HardwareEvent['event'], payload: Record<string, stri
   return entry;
 }
 
-// 1. Abrir relé del Akuvox E12W (DoorNum=1) o relé secundario (DoorNum=2)
+// 1. Abrir relé del Akuvox E12W (DoorNum=1) o relé secundario (DoorNum=2) vía AkuvoxController
 app.post('/api/akuvox/open-door', async (req, res) => {
   const {
+    buildingId = 'bldg-pocitos-2468',
     deviceIp,
     httpPort = 80,
     apiUser = 'admin',
@@ -59,105 +72,93 @@ app.post('/api/akuvox/open-door', async (req, res) => {
     highSecurityMode = true,
     doorNum = 1,
     secondaryRelayUrl = '',
+    forceReal,
   } = req.body ?? {};
 
-  if (!deviceIp && doorNum === 1) {
-    res.status(400).json({ ok: false, message: 'Falta deviceIp del Akuvox E12W.' });
-    return;
-  }
+  const relayId: 1 | 2 = Number(doorNum) === 2 ? 2 : 1;
+  const result = await openDoor(String(buildingId), relayId, {
+    deviceIp: deviceIp ? String(deviceIp) : undefined,
+    httpPort: Number(httpPort),
+    apiUser: String(apiUser),
+    apiPassword: String(apiPassword),
+    highSecurityMode: Boolean(highSecurityMode),
+    secondaryRelayUrl: secondaryRelayUrl ? String(secondaryRelayUrl) : undefined,
+    forceReal: typeof forceReal === 'boolean' ? forceReal : Boolean(deviceIp && !isAkuvoxMockMode()),
+  });
 
-  try {
-    // Puerta 2 (Doble Exclusa): usa relé IP secundario porque el E12W tiene 1 solo relé integrado
-    if (Number(doorNum) === 2 && secondaryRelayUrl) {
-      const r2 = await fetch(secondaryRelayUrl, { signal: AbortSignal.timeout(5000) });
-      res.json({
-        ok: r2.ok,
-        message: r2.ok
-          ? 'Relé 2 externo (Puerta Hall / Doble Exclusa) activado correctamente.'
-          : `Relé 2 respondió HTTP ${r2.status}`,
-      });
-      return;
-    }
+  recordEvent('relay_change', {
+    buildingId: result.buildingId,
+    relayId: String(result.relayId),
+    authScheme: result.authScheme,
+    ok: String(result.ok),
+  });
 
-    const host = Number(httpPort) === 80 ? deviceIp : `${deviceIp}:${httpPort}`;
-    const url = highSecurityMode
-      ? `http://${host}/fcgi/OpenDoor?action=OpenDoor&DoorNum=1`
-      : `http://${host}/fcgi/do?action=OpenDoor&UserName=${encodeURIComponent(
-          apiUser
-        )}&Password=${encodeURIComponent(apiPassword)}&DoorNum=1`;
-
-    const headers: Record<string, string> = {};
-    if (highSecurityMode) {
-      const token = Buffer.from(`${apiUser}:${apiPassword}`).toString('base64');
-      headers['Authorization'] = `Basic ${token}`;
-    }
-
-    const response = await fetch(url, {
-      method: 'GET',
-      headers,
-      signal: AbortSignal.timeout(5000),
-    });
-
-    const text = await response.text();
-    res.json({
-      ok: response.ok,
-      message: response.ok
-        ? 'Relé 1 del Akuvox E12W desbloqueado.'
-        : `Akuvox respondió HTTP ${response.status}: ${text.slice(0, 120)}`,
-    });
-  } catch (err) {
-    res.status(502).json({
-      ok: false,
-      message: `Error conectando al Akuvox E12W (${deviceIp}): ${
-        err instanceof Error ? err.message : 'Timeout'
-      }`,
-    });
-  }
+  res.status(result.ok ? 200 : 502).json(result);
 });
 
-// 2. Probar conexión y capturar snapshot en vivo del E12W (:8080/picture.jpg o /jpeg.cgi)
+// 2. Probar conexión y capturar snapshot 1080p en vivo vía AkuvoxController (Basic/Digest Auth)
 app.get('/api/akuvox/test', async (req, res) => {
-  const deviceIp = String(req.query.deviceIp || '');
-  const apiUser = String(req.query.apiUser || 'admin');
-  const apiPassword = String(req.query.apiPassword || '');
+  const buildingId = String(req.query.buildingId || 'bldg-pocitos-2468');
+  const deviceIp = req.query.deviceIp ? String(req.query.deviceIp) : undefined;
+  const apiUser = req.query.apiUser ? String(req.query.apiUser) : undefined;
+  const apiPassword = req.query.apiPassword ? String(req.query.apiPassword) : undefined;
 
-  if (!deviceIp) {
-    res.status(400).json({ ok: false, message: 'Ingresá la IP del Akuvox E12W.' });
-    return;
-  }
-
-  const authHeader = `Basic ${Buffer.from(`${apiUser}:${apiPassword}`).toString('base64')}`;
-  const candidates = [
-    `http://${deviceIp}:8080/picture.jpg`,
-    `http://${deviceIp}:8080/jpeg.cgi`,
-    `http://${deviceIp}/picture.jpg`,
-  ];
-
-  for (const url of candidates) {
-    try {
-      const snap = await fetch(url, {
-        headers: { Authorization: authHeader },
-        signal: AbortSignal.timeout(4000),
-      });
-      if (snap.ok) {
-        const buf = Buffer.from(await snap.arrayBuffer());
-        const b64 = `data:image/jpeg;base64,${buf.toString('base64')}`;
-        res.json({
-          ok: true,
-          message: `Conexión OK con Akuvox E12W (${url})`,
-          snapshotDataUrl: b64,
-        });
-        return;
-      }
-    } catch {
-      // Try next snapshot endpoint
-    }
-  }
-
-  res.status(502).json({
-    ok: false,
-    message: `No se pudo obtener snapshot de ${deviceIp} (:8080/picture.jpg). Verificá que el E12W esté en la misma red y RTSP/HTTP habilitado.`,
+  const snap = await getSnapshot(buildingId, {
+    deviceIp,
+    apiUser,
+    apiPassword,
+    forceReal: Boolean(deviceIp && !isAkuvoxMockMode()),
   });
+
+  res.status(snap.ok ? 200 : 502).json({
+    ok: snap.ok,
+    simulated: snap.simulated,
+    message: snap.message,
+    snapshotDataUrl: snap.dataUrl,
+    sourceUrl: snap.sourceUrl,
+  });
+});
+
+app.get('/api/akuvox/snapshot', async (req, res) => {
+  const buildingId = String(req.query.buildingId || 'bldg-pocitos-2468');
+  const deviceIp = req.query.deviceIp ? String(req.query.deviceIp) : undefined;
+  const snap = await getSnapshot(buildingId, { deviceIp });
+  res.status(snap.ok ? 200 : 502).json(snap);
+});
+
+// 2.5 Sincronizar UIDs de llaveros/tarjetas RFID 13.56 MHz hacia el Akuvox E12W
+app.post('/api/akuvox/sync-rfid', async (req, res) => {
+  const {
+    buildingId = 'bldg-pocitos-2468',
+    cards = [],
+    deviceIp,
+    httpPort = 80,
+    apiUser = 'admin',
+    apiPassword = '',
+    highSecurityMode = true,
+    forceReal,
+  } = req.body ?? {};
+
+  const result = await syncRfidCards(
+    String(buildingId),
+    Array.isArray(cards) ? (cards as RfidCardSyncItem[]) : [],
+    {
+      deviceIp: deviceIp ? String(deviceIp) : undefined,
+      httpPort: Number(httpPort),
+      apiUser: String(apiUser),
+      apiPassword: String(apiPassword),
+      highSecurityMode: Boolean(highSecurityMode),
+      forceReal: typeof forceReal === 'boolean' ? forceReal : undefined,
+    }
+  );
+
+  recordEvent('rfid_scan', {
+    action: 'sync_rfid_cards',
+    syncedCount: String(result.syncedCount),
+    simulated: String(result.simulated),
+  });
+
+  res.status(result.ok ? 200 : 502).json(result);
 });
 
 // 3. Webhook Third-Party QR Integration del Akuvox E12W
@@ -615,8 +616,79 @@ app.post('/api/packages/validate-frame', async (req, res) => {
   });
 });
 
+// ============================================================================
+// 10. Orquestador del Portero Virtual con IA (Webhook Botón E12W + Voz / SIP)
+// ============================================================================
+app.post('/api/concierge/webhook/call-start', async (req, res) => {
+  const buildingId = String(req.body?.buildingId || 'bldg-pocitos-2468');
+  const snap = await getSnapshot(buildingId);
+  recordEvent('call_start', {
+    buildingId,
+    source: 'akuvox_e12w_button',
+    snapshotOk: String(snap.ok),
+  });
+  res.json({
+    ok: true,
+    sessionId: `sip-${Date.now()}`,
+    greeting: 'Hola, bienvenido al edificio. ¿A qué departamento visitás o traés entrega?',
+    systemPromptLoaded: ZAGUAN_CONCIERGE_SYSTEM_PROMPT.length > 0,
+    availableTools: ['buscarResidente', 'validarCodigoVoz', 'procesarPaquete'],
+    snapshotDataUrl: snap.dataUrl,
+  });
+});
+
+app.post('/api/concierge/turn', async (req, res) => {
+  const {
+    utterance = '',
+    buildingId = 'bldg-pocitos-2468',
+    residents = [
+      { unit: '4B', name: 'Martín Silva', active: true },
+      { unit: '3A', name: 'Carolina Vega', active: true },
+      { unit: '2B', name: 'Roberto Pereyra', active: true },
+    ],
+    activeVoicePasses,
+    expectedPackages,
+  } = req.body ?? {};
+
+  if (!String(utterance).trim()) {
+    res.status(400).json({ ok: false, message: 'Falta utterance (frase del visitante).' });
+    return;
+  }
+
+  const passesFromStore = Array.from(magicPassStore.values())
+    .filter((p) => p.status === 'active')
+    .map((p) => ({
+      code: p.token,
+      pin: p.pin,
+      guestName: p.guestName,
+      unit: p.unit,
+      singleUse: p.passType === 'one_time',
+      validUntilIso: p.validUntilIso,
+    }));
+
+  const turn = await handleConciergeUtterance(String(utterance), {
+    buildingId: String(buildingId),
+    residents,
+    activeVoicePasses: Array.isArray(activeVoicePasses) ? activeVoicePasses : passesFromStore,
+    expectedPackages: Array.isArray(expectedPackages)
+      ? expectedPackages
+      : expectedPackageStore.filter((p) => p.status === 'expected'),
+  });
+
+  recordEvent('call_start', {
+    engine: turn.engine,
+    tools: turn.toolCalls.map((t) => t.tool).join(',') || 'none',
+    doorOpened: String(turn.doorOpened),
+  });
+
+  res.json({ ok: true, ...turn });
+});
+
 app.listen(PORT, '0.0.0.0', () => {
-  console.log(`Zaguán Digital — Puente Akuvox E12W activo en http://0.0.0.0:${PORT}`);
+  console.log(
+    `Zaguán Digital — Puente Akuvox E12W + Orquestador IA activo en http://0.0.0.0:${PORT} (MOCK=${isAkuvoxMockMode()})`
+  );
   console.log(`  • Third-Party QR Webhook: http://<TU_IP>:${PORT}/api/akuvox/webhook/qr?codeKey={QRCode}&deviceId={DeviceID}`);
   console.log(`  • Action URL Webhook:     http://<TU_IP>:${PORT}/api/akuvox/webhook/action?event=call_start&mac=$mac&ip=$ip`);
+  console.log(`  • AI Concierge Webhook:   POST http://<TU_IP>:${PORT}/api/concierge/webhook/call-start`);
 });

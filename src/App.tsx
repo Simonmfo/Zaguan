@@ -1479,6 +1479,7 @@ export default function App() {
           }}
           onUpdateLiveSnapshot={setLiveSnapshotUrl}
           tenants={tenants}
+          recurringPasses={recurringPasses}
           masterKeys={masterKeys}
           notices={notices}
           securityAlerts={securityAlerts}

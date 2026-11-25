@@ -161,3 +161,65 @@ export async function pollAkuvoxEvents(
     return [];
   }
 }
+
+export async function syncAkuvoxRfidCards(
+  config: AkuvoxConfig,
+  buildingId: string,
+  cards: Array<{
+    uid: string;
+    holderName: string;
+    unit: string;
+    days: string[];
+    startTime: string;
+    endTime: string;
+    active: boolean;
+  }>
+): Promise<{ ok: boolean; syncedCount: number; simulated: boolean; message: string }> {
+  const activeCount = cards.filter((c) => c.active && c.uid).length;
+  if (!config.enabled) {
+    return {
+      ok: true,
+      syncedCount: activeCount,
+      simulated: true,
+      message: `${activeCount} tarjeta(s) RFID 13.56 MHz listas (modo simulador; activá Hardware Real para grabar en el E12W).`,
+    };
+  }
+
+  try {
+    const res = await fetch(`${apiBase(config)}/api/akuvox/sync-rfid`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        buildingId,
+        cards,
+        deviceIp: config.deviceIp,
+        httpPort: config.httpPort,
+        apiUser: config.apiUser,
+        apiPassword: config.apiPassword,
+        highSecurityMode: config.highSecurityMode,
+        forceReal: true,
+      }),
+    });
+    const data = (await res.json()) as {
+      ok: boolean;
+      syncedCount?: number;
+      simulated?: boolean;
+      message?: string;
+    };
+    return {
+      ok: res.ok && data.ok,
+      syncedCount: data.syncedCount ?? 0,
+      simulated: Boolean(data.simulated),
+      message: data.message || 'Sincronización RFID finalizada.',
+    };
+  } catch (err) {
+    return {
+      ok: false,
+      syncedCount: 0,
+      simulated: false,
+      message: `No se pudo contactar /api/akuvox/sync-rfid (ejecutá "npm run server"): ${
+        err instanceof Error ? err.message : 'Error de red'
+      }`,
+    };
+  }
+}

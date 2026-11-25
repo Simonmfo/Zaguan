@@ -4,24 +4,30 @@ import {
   buildAkuvoxRtspUrl,
   buildAkuvoxSnapshotUrl,
   buildZaguanWebhookUrls,
+  syncAkuvoxRfidCards,
   testAkuvoxConnection,
 } from '../services/akuvoxService';
-import { AkuvoxConfig } from '../types/zaguan';
+import { AkuvoxConfig, RecurringPass } from '../types/zaguan';
 
 interface AkuvoxConfigPanelProps {
+  buildingId: string;
   config: AkuvoxConfig;
+  recurringPasses: RecurringPass[];
   onChangeConfig: (next: AkuvoxConfig) => void;
   onTestDoorRelay: () => Promise<void>;
   onUpdateLiveSnapshot: (url: string | null) => void;
 }
 
 export function AkuvoxConfigPanel({
+  buildingId,
   config,
+  recurringPasses,
   onChangeConfig,
   onTestDoorRelay,
   onUpdateLiveSnapshot,
 }: AkuvoxConfigPanelProps) {
   const [testing, setTesting] = useState(false);
+  const [syncingRfid, setSyncingRfid] = useState(false);
   const [statusMsg, setStatusMsg] = useState<{ ok: boolean; text: string } | null>(null);
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
 
@@ -44,6 +50,24 @@ export function AkuvoxConfigPanel({
     if (result.snapshotDataUrl) {
       onUpdateLiveSnapshot(result.snapshotDataUrl);
     }
+  };
+
+  const handleSyncRfid = async () => {
+    setSyncingRfid(true);
+    const cards = recurringPasses
+      .filter((r) => Boolean(r.rfidTag))
+      .map((r) => ({
+        uid: r.rfidTag,
+        holderName: r.name,
+        unit: r.unit,
+        days: r.days,
+        startTime: r.startTime,
+        endTime: r.endTime,
+        active: r.status === 'Activo',
+      }));
+    const result = await syncAkuvoxRfidCards(config, buildingId, cards);
+    setSyncingRfid(false);
+    setStatusMsg({ ok: result.ok, text: result.message });
   };
 
   return (
@@ -186,7 +210,15 @@ export function AkuvoxConfigPanel({
               onClick={() => void onTestDoorRelay()}
               className="px-4 py-2 rounded bg-secondary text-on-secondary font-label text-label-sm hover:opacity-95 cursor-pointer"
             >
-              Disparar Relé 1 (Puerta E12W)
+              Disparar Relé 1 (E12W)
+            </button>
+            <button
+              type="button"
+              onClick={() => void handleSyncRfid()}
+              disabled={syncingRfid}
+              className="px-4 py-2 rounded bg-surface-container-low border border-outline-variant text-on-surface font-label text-label-sm hover:bg-surface-container cursor-pointer disabled:opacity-60"
+            >
+              {syncingRfid ? 'Sincronizando RFID...' : 'Sincronizar RFID → E12W'}
             </button>
           </div>
 
