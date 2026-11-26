@@ -2,11 +2,13 @@ import { ChangeEvent, FormEvent, useEffect, useRef, useState } from 'react';
 import { ASSETS, BUILDING_INFO } from '../data/zaguanData';
 import { buildAkuvoxRtspUrl } from '../services/akuvoxService';
 import {
+  askLuciaGeminiFallback,
   getLuciaActiveVoiceLabel,
   LuciaClipCategory,
   pickLuciaClip,
   playIntercomChime,
   playLuciaClipFile,
+  speakGeminiFallbackReply,
   stopLuciaSpeech,
   unlockLuciaAudio,
 } from '../services/luciaVoiceService';
@@ -160,6 +162,8 @@ export function PorteroIaView({
   voiceEnabledRef.current = voiceAudioEnabled;
   const activeRecognitionRef = useRef<{ stop: () => void; abort: () => void } | null>(null);
   const silenceTimerRef = useRef<number | null>(null);
+  const noAnswerTimerRef = useRef<number | null>(null);
+  const pendingPackageCarrierRef = useRef<string | null>(null);
   const liveTranscriptRef = useRef('');
   const micCommittedRef = useRef(false);
 
@@ -240,10 +244,30 @@ export function PorteroIaView({
     return clip.text;
   };
 
+  const clearNoAnswerTimer = () => {
+    if (noAnswerTimerRef.current !== null) {
+      window.clearTimeout(noAnswerTimerRef.current);
+      noAnswerTimerRef.current = null;
+    }
+  };
+
+  const armNoAnswerTimer = (unit: string) => {
+    clearNoAnswerTimer();
+    noAnswerTimerRef.current = window.setTimeout(() => {
+      const text = playRecordedCategory('no-answer');
+      setChatLog((prev) => [
+        ...prev,
+        { id: `noans-${Date.now()}`, sender: 'ia', text: `${text} (Apto ${unit})`, time: nowTime() },
+      ]);
+      setRemoteRingStatus(`Sin respuesta del celular en 25s (Apto ${unit})`);
+    }, 25000);
+  };
+
   useEffect(() => {
     const unsubscribe = subscribeToRemoteDoorbellResponses(
       doorbellChannel,
       (resp) => {
+        clearNoAnswerTimer();
         if (resp.action === 'approve' || resp.action === 'approve_package') {
           const isPkg = resp.action === 'approve_package';
           if (isPkg) {
@@ -279,6 +303,7 @@ export function PorteroIaView({
               : `Celular rechazó el ingreso (Apto ${resp.unit})`
           );
         } else if (resp.action === 'talk' && resp.message) {
+          playRecordedCategory('connecting-resident');
           const msg = `Del ${resp.unit} te dicen: ${resp.message}`;
           setChatLog((prev) => [
             ...prev,
@@ -293,6 +318,7 @@ export function PorteroIaView({
       (connected) => setRemoteConnected(connected)
     );
     return () => {
+      clearNoAnswerTimer();
       unsubscribe();
       stopLuciaSpeech();
     };
@@ -481,6 +507,8 @@ export function PorteroIaView({
     ]);
   };
 
+  const KNOWN_BUILDING_UNITS = ['1A', '2B', '3A', '4B', '402', '501'];
+
   const processNaturalUtterance = (raw: string) => {
     const text = raw.trim();
     if (!text) return;
@@ -492,7 +520,30 @@ export function PorteroIaView({
     pushBubble('visitante', text);
     const lower = text.toLowerCase();
 
-    // 0. Check if visitor dictated a 4-digit voice code (e.g. "Tengo el código 7310")
+    // 0. Emergencias (Bomberos / Ambulancia / Policía) → audio local inmediato + alerta urgente
+    if (
+      lower.includes('emergencia') ||
+      lower.includes('ambulancia') ||
+      lower.includes('bomberos') ||
+      lower.includes('policía') ||
+      lower.includes('policia') ||
+      lower.includes('urgencia') ||
+      lower.includes('médico') ||
+      lower.includes('medico')
+    ) {
+      const emText = playRecordedCategory('emergency');
+      pushBubble('ia', emText);
+      void dispatchRingToAndroidPhone({
+        kind: 'visit',
+        visitorName: 'URGENCIA / EMERGENCIA',
+        residentName: 'Administración y Residente',
+        unit: BUILDING_INFO.activeUnit,
+        transcript: text,
+      });
+      return;
+    }
+
+    // 1. Código numérico de 4 dígitos (dictado por voz)
     const voicePinMatch = text.match(/(?:c[oó]digo|pin|clave|n[uú]mero)?\s*\b(\d{4})\b/i);
     if (
       voicePinMatch &&
@@ -506,13 +557,47 @@ export function PorteroIaView({
       const simDay: DayOfWeek = simScheduleSlot === 'allowed' ? 'M' : 'L';
       const simHour = simScheduleSlot === 'allowed' ? '09:30' : '19:00';
       const res = onValidatePinOrQr(spokenCode, simDay, simHour);
-      pushBubble('ia', res.message, res.ok ? 'code-valid' : 'code-invalid');
+      const isScheduleBlocked =
+        !res.ok &&
+        (res.message.toLowerCase().includes('horario') ||
+          res.message.toLowerCase().includes('franja') ||
+          res.message.toLowerCase().includes('día'));
+      pushBubble(
+        'ia',
+        res.message,
+        res.ok ? 'code-valid' : isScheduleBlocked ? 'outside-schedule' : 'code-invalid'
+      );
       setPinFeedback({ ok: res.ok, text: res.message });
       return;
     }
 
-    // 1. Check if it's a parcel / delivery utterance (local deterministic parser, zero AI)
+    // 2. Instrucción de QR / etiqueta en cámara
+    if (lower.includes('qr') || lower.includes('etiqueta') || lower.includes('cámara') || lower.includes('camara')) {
+      const camText = playRecordedCategory('show-camera');
+      pushBubble('ia', camText);
+      return;
+    }
+
+    // 3. Proveedores / técnicos del edificio (UTE, OSE, Antel, ascensores, mantenimiento)
+    if (
+      lower.includes('ute') ||
+      lower.includes('ose') ||
+      lower.includes('antel') ||
+      lower.includes('ascensor') ||
+      lower.includes('técnico') ||
+      lower.includes('tecnico') ||
+      lower.includes('sanitaria') ||
+      lower.includes('electricista') ||
+      lower.includes('mantenimiento')
+    ) {
+      const provText = playRecordedCategory('provider-help');
+      pushBubble('ia', provText);
+      return;
+    }
+
+    // 4. Paquetes / entregas (si no dijo apartamento, preguntar con `package-ask-unit-1.m4a`)
     const isParcel =
+      Boolean(pendingPackageCarrierRef.current) ||
       lower.includes('paquete') ||
       lower.includes('entrega') ||
       lower.includes('mercado libre') ||
@@ -525,20 +610,10 @@ export function PorteroIaView({
       lower.includes('envío') ||
       lower.includes('envio');
 
+    const unitMatch = text.match(/\b([1-9][a-dA-D]|[1-9]\d{2})\b/);
+
     if (isParcel) {
-      const unitMatch = text.match(/\b([1-9][a-dA-D]|[1-9]\d{2})\b/);
-      const rawUnit = unitMatch ? unitMatch[1].toUpperCase() : BUILDING_INFO.activeUnit;
-      const unit = rawUnit === '402' ? '4B' : rawUnit;
-      const residentName = unit === '3A' ? 'Carolina' : 'Martín';
-
-      const foundPreAuth = preAuthParcels.find(
-        (p) =>
-          p.status === 'Esperando' &&
-          (p.unit.toUpperCase() === unit || lower.includes(p.carrier.toLowerCase()))
-      );
-
-      const carrier =
-        foundPreAuth?.carrier ||
+      const detectedCarrier =
         (lower.includes('pedidos')
           ? 'PedidosYa'
           : lower.includes('mercado')
@@ -547,7 +622,42 @@ export function PorteroIaView({
               ? 'DAC'
               : lower.includes('correo')
                 ? 'Correo Uruguayo'
-                : 'Paquetería');
+                : pendingPackageCarrierRef.current || 'Paquetería');
+
+      const hasResidentName =
+        lower.includes('martín') ||
+        lower.includes('martin') ||
+        lower.includes('carolina') ||
+        lower.includes('roberto');
+
+      if (!unitMatch && !hasResidentName) {
+        pendingPackageCarrierRef.current = detectedCarrier;
+        const askPkgUnit = playRecordedCategory('package-ask-unit');
+        pushBubble('ia', askPkgUnit);
+        return;
+      }
+
+      pendingPackageCarrierRef.current = null;
+      const rawUnit = unitMatch
+        ? unitMatch[1].toUpperCase()
+        : lower.includes('carolina')
+          ? '3A'
+          : BUILDING_INFO.activeUnit;
+
+      if (unitMatch && !KNOWN_BUILDING_UNITS.includes(rawUnit)) {
+        const notFound = playRecordedCategory('unit-not-found');
+        pushBubble('ia', `${notFound} (${rawUnit})`);
+        return;
+      }
+
+      const unit = rawUnit === '402' ? '4B' : rawUnit;
+      const residentName = unit === '3A' ? 'Carolina' : 'Martín';
+      const foundPreAuth = preAuthParcels.find(
+        (p) =>
+          p.status === 'Esperando' &&
+          (p.unit.toUpperCase() === unit || lower.includes(p.carrier.toLowerCase()))
+      );
+      const carrier = foundPreAuth?.carrier || detectedCarrier;
 
       // SIEMPRE notificar al celular del residente para confirmar si recibe el paquete o no
       const clipText = playRecordedCategory('package');
@@ -568,6 +678,7 @@ export function PorteroIaView({
         setMode('ocr-paquete');
       }
       onStartSpontaneousParcel(carrier, unit, storageMode);
+      armNoAnswerTimer(unit);
       void dispatchRingToAndroidPhone({
         kind: 'package',
         visitorName: `Repartidor ${carrier}`,
@@ -579,56 +690,82 @@ export function PorteroIaView({
       return;
     }
 
-    // 2. Visitor validation (100% deterministic local parser, never opens alone!)
-    const unitMatch = text.match(/\b([1-9][a-dA-D]|[1-9]\d{2})\b/);
+    // 5. Visita a apartamento / residente registrado
     const hasResidentHint =
       Boolean(unitMatch) ||
       lower.includes('martín') ||
       lower.includes('martin') ||
       lower.includes('carolina') ||
-      lower.includes('roberto') ||
-      lower.includes('vengo') ||
-      lower.includes('visita') ||
-      lower.includes('hola') ||
-      lower.includes('soy');
+      lower.includes('roberto');
 
-    if (!hasResidentHint) {
-      const repeatText = playRecordedCategory('ask-repeat');
-      pushBubble('ia', repeatText);
+    if (hasResidentHint) {
+      const rawUnit = unitMatch
+        ? unitMatch[1].toUpperCase()
+        : lower.includes('carolina')
+          ? '3A'
+          : BUILDING_INFO.activeUnit;
+
+      if (unitMatch && !KNOWN_BUILDING_UNITS.includes(rawUnit)) {
+        const notFound = playRecordedCategory('unit-not-found');
+        pushBubble('ia', `${notFound} (${rawUnit})`);
+        return;
+      }
+
+      const unit = rawUnit === '402' ? '4B' : rawUnit;
+      const soyMatch = text.match(/soy\s+([A-ZÁÉÍÓÚÑa-záéíóúñ]+)/i);
+      const visitorName = soyMatch ? soyMatch[1] : 'Simón';
+
+      const verMatch = text.match(/(?:ver a|para|busco a)\s+([A-ZÁÉÍÓÚÑa-záéíóúñ]+)/i);
+      const defaultResident = unit === '3A' ? 'Carolina' : 'Martín';
+      const residentName = verMatch ? verMatch[1] : defaultResident;
+
+      const clipText = playRecordedCategory('visit');
+      pushBubble('ia', `${clipText} (${residentName} · Apto ${unit})`);
+      if (hardwareModel === 'akuvox-e12w') {
+        onLogAkuvoxProtocol(
+          'rtsp',
+          `GET http://${akuvoxConfig.deviceIp}:8080/picture.jpg`,
+          `Foto en vivo enviada por Push/App a ${residentName} (${unit})`,
+          akuvoxConfig.enabled ? 'ok' : 'simulated'
+        );
+      }
+      onRequestVisitApproval(visitorName, residentName, unit, text);
+      armNoAnswerTimer(unit);
+      void dispatchRingToAndroidPhone({
+        kind: 'visit',
+        visitorName,
+        residentName,
+        unit,
+        transcript: text,
+      });
       return;
     }
 
-    const unit = unitMatch
-      ? unitMatch[1].toUpperCase()
-      : lower.includes('carolina')
-        ? '3A'
-        : BUILDING_INFO.activeUnit;
+    // 6. FALLBACK INTELIGENTE A GEMINI: solo si ninguna regla local / de los 31 audios pudo resolver
+    setRemoteRingStatus('Consulta fuera de guion → escalando a Gemini Fallback...');
+    void (async () => {
+      const fb = await askLuciaGeminiFallback({
+        utterance: text,
+        buildingName: BUILDING_INFO.name,
+        knownUnits: KNOWN_BUILDING_UNITS,
+      });
 
-    const soyMatch = text.match(/soy\s+([A-ZÁÉÍÓÚÑa-záéíóúñ]+)/i);
-    const visitorName = soyMatch ? soyMatch[1] : 'Simón';
-
-    const verMatch = text.match(/(?:ver a|para|busco a)\s+([A-ZÁÉÍÓÚÑa-záéíóúñ]+)/i);
-    const defaultResident = unit === '3A' ? 'Carolina' : 'Martín';
-    const residentName = verMatch ? verMatch[1] : defaultResident;
-
-    const clipText = playRecordedCategory('visit');
-    pushBubble('ia', `${clipText} (${residentName} · Apto ${unit})`);
-    if (hardwareModel === 'akuvox-e12w') {
-      onLogAkuvoxProtocol(
-        'rtsp',
-        `GET http://${akuvoxConfig.deviceIp}:8080/picture.jpg`,
-        `Foto en vivo enviada por Push/App a ${residentName} (${unit})`,
-        akuvoxConfig.enabled ? 'ok' : 'simulated'
-      );
-    }
-    onRequestVisitApproval(visitorName, residentName, unit, text);
-    void dispatchRingToAndroidPhone({
-      kind: 'visit',
-      visitorName,
-      residentName,
-      unit,
-      transcript: text,
-    });
+      if (fb.clipCategory !== 'none') {
+        const recorded = playRecordedCategory(fb.clipCategory);
+        pushBubble('ia', recorded);
+        setRemoteRingStatus(
+          fb.usedGemini
+            ? `Gemini clasificó → clip local (${fb.clipCategory})`
+            : `Sin API Gemini → clip local (${fb.clipCategory})`
+        );
+      } else {
+        pushBubble('ia', fb.replyText);
+        setRemoteRingStatus('Gemini respondió consulta personalizada');
+        if (voiceEnabledRef.current) {
+          await speakGeminiFallbackReply(fb.replyText, (info) => setLuciaVoiceLabel(info.label));
+        }
+      }
+    })();
   };
 
   const handleUtteranceSubmit = (e: FormEvent) => {
@@ -667,7 +804,14 @@ export function PorteroIaView({
 
     const res = onValidatePinOrQr(code, simDay, simHour);
     setPinFeedback({ ok: res.ok, text: res.message });
-    playRecordedCategory(res.ok ? 'code-valid' : 'code-invalid');
+    const isScheduleBlocked =
+      !res.ok &&
+      (res.message.toLowerCase().includes('horario') ||
+        res.message.toLowerCase().includes('franja') ||
+        res.message.toLowerCase().includes('día'));
+    playRecordedCategory(
+      res.ok ? 'code-valid' : isScheduleBlocked ? 'outside-schedule' : 'code-invalid'
+    );
     if (!codeOverride) setPinInput('');
   };
 

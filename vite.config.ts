@@ -60,6 +60,10 @@ export default defineConfig(() => {
           target: 'http://localhost:3001',
           changeOrigin: true,
         },
+        '/api/lucia-fallback': {
+          target: 'http://localhost:3001',
+          changeOrigin: true,
+        },
       },
     },
   };

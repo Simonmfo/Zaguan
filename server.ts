@@ -705,6 +705,65 @@ app.post('/api/lucia-tts', async (req, res) => {
   }
 });
 
+// 10.6 Fallback inteligente con Gemini 2.5 Flash SOLO cuando las reglas locales/31 audios no pueden resolver
+app.post('/api/lucia-fallback', async (req, res) => {
+  const utterance = String(req.body?.utterance || '').trim().slice(0, 400);
+  const buildingName = String(req.body?.buildingName || 'Edificio Pocitos 2468');
+  const knownUnits = Array.isArray(req.body?.knownUnits)
+    ? req.body.knownUnits.slice(0, 40)
+    : ['1A', '2B', '3A', '4B', '501'];
+
+  if (!utterance) {
+    res.status(400).json({ ok: false, error: 'Missing utterance' });
+    return;
+  }
+
+  const apiKey = process.env.GEMINI_API_KEY;
+  if (!apiKey) {
+    res.json({
+      ok: true,
+      usedGemini: false,
+      clipCategory: 'out-of-scope',
+      replyText:
+        'Disculpá, solo gestiono ingresos y entregas. Decime a qué apartamento venís o si traés un paquete.',
+    });
+    return;
+  }
+
+  try {
+    const ai = new GoogleGenAI({ apiKey });
+    const response = await ai.models.generateContent({
+      model: 'gemini-2.5-flash',
+      contents: [
+        `Edificio: ${buildingName}. Apartamentos registrados: ${knownUnits.join(', ')}.`,
+        `Visitante dijo al videoportero: "${utterance}"`,
+        `Respondé ÚNICAMENTE JSON: { "replyText": string (1 oración corta y bien uruguaya como LucIA), "clipCategory": "none" | "out-of-scope" | "provider-help" | "emergency" | "package-ask-unit" | "unit-not-found" | "show-camera" | "elderly-help" | "ask-repeat" }.`,
+      ].join('\n'),
+      config: { responseMimeType: 'application/json' },
+    });
+    const parsed = JSON.parse(response.text || '{}') as {
+      replyText?: string;
+      clipCategory?: string;
+    };
+    res.json({
+      ok: true,
+      usedGemini: true,
+      clipCategory: parsed.clipCategory || 'none',
+      replyText:
+        String(parsed.replyText || '').trim() ||
+        'Disculpá, solo gestiono ingresos y entregas. Decime a qué apartamento venís o si traés un paquete.',
+    });
+  } catch {
+    res.json({
+      ok: true,
+      usedGemini: false,
+      clipCategory: 'out-of-scope',
+      replyText:
+        'Disculpá, solo gestiono ingresos y entregas. Decime a qué apartamento venís o si traés un paquete.',
+    });
+  }
+});
+
 app.post('/api/concierge/turn', async (req, res) => {
   const {
     utterance = '',

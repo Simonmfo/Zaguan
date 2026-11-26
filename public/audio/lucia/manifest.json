@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-11-26T17:54:53.059Z",
+  "generatedAt": "2026-11-26T18:15:37.808Z",
   "clips": {
     "greeting-1": {
       "file": "/audio/lucia/greeting-1.m4a",
@@ -110,6 +110,51 @@
       "file": "/audio/lucia/elderly-help-1.m4a",
       "category": "elderly-help",
       "text": "Quedate tranquilo que no necesitás celular. Decime tu nombre y a qué apartamento venís que ya les aviso."
+    },
+    "no-answer-1": {
+      "file": "/audio/lucia/no-answer-1.m4a",
+      "category": "no-answer",
+      "text": "Disculpá, no atendieron en el apartamento. Intentá llamarlos por teléfono o probá en unos minutos."
+    },
+    "unit-not-found-1": {
+      "file": "/audio/lucia/unit-not-found-1.m4a",
+      "category": "unit-not-found",
+      "text": "Disculpá, ese apartamento no me figura registrado. ¿Me repetís el número?"
+    },
+    "package-ask-unit-1": {
+      "file": "/audio/lucia/package-ask-unit-1.m4a",
+      "category": "package-ask-unit",
+      "text": "Bárbaro, ¿para qué apartamento es el paquete?"
+    },
+    "provider-help-1": {
+      "file": "/audio/lucia/provider-help-1.m4a",
+      "category": "provider-help",
+      "text": "Dale, si tenés código de llave maestra decímelo ahora; si no, ya le aviso a la administración."
+    },
+    "outside-schedule-1": {
+      "file": "/audio/lucia/outside-schedule-1.m4a",
+      "category": "outside-schedule",
+      "text": "Tu permiso no está habilitado en este horario. Pedile al residente que te autorice desde la aplicación."
+    },
+    "show-camera-1": {
+      "file": "/audio/lucia/show-camera-1.m4a",
+      "category": "show-camera",
+      "text": "Acercá el código QR o la etiqueta a la cámara de arriba así lo leo."
+    },
+    "connecting-resident-1": {
+      "file": "/audio/lucia/connecting-resident-1.m4a",
+      "category": "connecting-resident",
+      "text": "Aguardá un toque que ya te comunico con el apartamento."
+    },
+    "out-of-scope-1": {
+      "file": "/audio/lucia/out-of-scope-1.m4a",
+      "category": "out-of-scope",
+      "text": "Disculpá, solo gestiono ingresos y entregas. Decime a qué apartamento venís o si traés un paquete."
+    },
+    "emergency-1": {
+      "file": "/audio/lucia/emergency-1.m4a",
+      "category": "emergency",
+      "text": "Entendido, ya doy aviso urgente al apartamento y a la administración."
     }
   }
 }

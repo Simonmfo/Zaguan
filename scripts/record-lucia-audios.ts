@@ -23,7 +23,16 @@ export interface LuciaClipSpec {
     | 'code-valid'
     | 'code-invalid'
     | 'ask-repeat'
-    | 'elderly-help';
+    | 'elderly-help'
+    | 'no-answer'
+    | 'unit-not-found'
+    | 'package-ask-unit'
+    | 'provider-help'
+    | 'outside-schedule'
+    | 'show-camera'
+    | 'connecting-resident'
+    | 'out-of-scope'
+    | 'emergency';
   text: string;
 }
 
@@ -55,6 +64,17 @@ export const LUCIA_CLIPS: LuciaClipSpec[] = [
   { id: 'code-invalid-1', category: 'code-invalid', text: 'Disculpá, ese código no está activo o ya venció. Decime a qué apartamento venís.' },
   { id: 'ask-repeat-1', category: 'ask-repeat', text: 'Disculpá, no te escuché bien. ¿Me repetís a qué apartamento venís?' },
   { id: 'elderly-help-1', category: 'elderly-help', text: 'Quedate tranquilo que no necesitás celular. Decime tu nombre y a qué apartamento venís que ya les aviso.' },
+
+  // 9 clips adicionales para cobertura completa de casos reales del edificio
+  { id: 'no-answer-1', category: 'no-answer', text: 'Disculpá, no atendieron en el apartamento. Intentá llamarlos por teléfono o probá en unos minutos.' },
+  { id: 'unit-not-found-1', category: 'unit-not-found', text: 'Disculpá, ese apartamento no me figura registrado. ¿Me repetís el número?' },
+  { id: 'package-ask-unit-1', category: 'package-ask-unit', text: 'Bárbaro, ¿para qué apartamento es el paquete?' },
+  { id: 'provider-help-1', category: 'provider-help', text: 'Dale, si tenés código de llave maestra decímelo ahora; si no, ya le aviso a la administración.' },
+  { id: 'outside-schedule-1', category: 'outside-schedule', text: 'Tu permiso no está habilitado en este horario. Pedile al residente que te autorice desde la aplicación.' },
+  { id: 'show-camera-1', category: 'show-camera', text: 'Acercá el código QR o la etiqueta a la cámara de arriba así lo leo.' },
+  { id: 'connecting-resident-1', category: 'connecting-resident', text: 'Aguardá un toque que ya te comunico con el apartamento.' },
+  { id: 'out-of-scope-1', category: 'out-of-scope', text: 'Disculpá, solo gestiono ingresos y entregas. Decime a qué apartamento venís o si traés un paquete.' },
+  { id: 'emergency-1', category: 'emergency', text: 'Entendido, ya doy aviso urgente al apartamento y a la administración.' },
 ];
 
 const SAMPLE_RATE = 24000;
@@ -288,8 +308,8 @@ async function main() {
     }
   }
 
-  // Dividir los faltantes en mini-lotes de 3 frases (18 faltantes = solo 6 requests a Gemini!)
-  const batchSize = 3;
+  // Dividir los faltantes en lotes de hasta 5 frases (9 faltantes = solo 2 requests a Gemini!)
+  const batchSize = 5;
   const batches: LuciaClipSpec[][] = [];
   for (let i = 0; i < missing.length; i += batchSize) {
     batches.push(missing.slice(i, i + batchSize));
