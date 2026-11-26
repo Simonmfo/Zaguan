@@ -88,6 +88,28 @@ export async function signOutSupabase(): Promise<void> {
   await client.auth.signOut();
 }
 
+export async function syncBuildingToSupabase(building: BuildingRecord): Promise<void> {
+  const client = getSupabaseClient();
+  if (!client) return;
+  await client.from('buildings').insert({
+    name: building.name,
+    address: building.address,
+    city: building.city,
+    latitude: building.latitude,
+    longitude: building.longitude,
+    geofence_radius_meters: building.geofenceRadiusMeters,
+    parcel_storage_mode: building.parcelStorageMode,
+    parcel_schedule_config: {
+      enabled: true,
+      start_time: building.parcelHoursStart,
+      end_time: building.parcelHoursEnd,
+      spontaneous_timeout_seconds: building.spontaneousTimeoutSec,
+    },
+    akuvox_endpoint: building.akuvoxIp,
+    akuvox_api_user: building.akuvoxApiUser,
+  });
+}
+
 export async function syncUnitToSupabase(unit: BuildingUnit): Promise<void> {
   const client = getSupabaseClient();
   if (!client) return;

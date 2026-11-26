@@ -6,3 +6,8 @@ dist/
 .env.*.local
 *.log
 npm-debug.log*
+android/.gradle/
+android/build/
+android/app/build/
+android/local.properties
+

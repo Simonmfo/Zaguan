@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { AppResidenteView } from './components/AppResidenteView';
+import { InstallerView } from './components/InstallerView';
+import { LoginView } from './components/LoginView';
 import { ModuloRetrofitView } from './components/ModuloRetrofitView';
 import { PanelAdminView } from './components/PanelAdminView';
 import { PorteroIaView } from './components/PorteroIaView';
@@ -21,6 +23,7 @@ import {
   revokePassInSupabase,
   subscribeToAccessLogsRealtime,
   syncAccessLogToSupabase,
+  syncBuildingToSupabase,
   syncDeliveredPackageToSupabase,
   syncMasterKeyToSupabase,
   syncNoticeToSupabase,
@@ -40,6 +43,7 @@ import {
   INITIAL_ACCESS_LOGS,
   INITIAL_ACTIVITY,
   INITIAL_BUILDINGS,
+  INITIAL_DEMO_USERS,
   INITIAL_MASTER_KEYS,
   INITIAL_NOTICES,
   INITIAL_PARCELS,
@@ -57,6 +61,7 @@ import {
   ActivityEvent,
   AkuvoxConfig,
   AkuvoxLogEntry,
+  AppAuthUser,
   BuildingNotice,
   BuildingRecord,
   BuildingTenant,
@@ -101,7 +106,13 @@ export default function App() {
   const [magicLinkToken, setMagicLinkToken] = useState<string | null>(() =>
     extractMagicLinkTokenFromUrl()
   );
-  const [activeScreen, setActiveScreen] = useState<MainScreen>('web-principal');
+
+  // Unified Multi-Role Auth (Login-first on App / APK launch!)
+  const [authUsers, setAuthUsers] = useState<AppAuthUser[]>(INITIAL_DEMO_USERS);
+  const [currentUser, setCurrentUser] = useState<AppAuthUser | null>(null);
+  const [viewingPublicWeb, setViewingPublicWeb] = useState(false);
+
+  const [activeScreen, setActiveScreen] = useState<MainScreen>('installer');
   const [pendingAnchor, setPendingAnchor] = useState<string | null>(null);
   const [residentTab, setResidentTab] = useState<ResidentTab>('inicio');
 
@@ -154,7 +165,7 @@ export default function App() {
   );
 
   // Multi-building, Roles & Admin Panel state
-  const [buildings] = useState<BuildingRecord[]>(INITIAL_BUILDINGS);
+  const [buildings, setBuildings] = useState<BuildingRecord[]>(INITIAL_BUILDINGS);
   const [activeBuildingId, setActiveBuildingId] = useState<string>(INITIAL_BUILDINGS[0].id);
   const [currentRole, setCurrentRole] = useState<UserRole>('building_admin');
   const [units, setUnits] = useState<BuildingUnit[]>(INITIAL_UNITS);
@@ -1142,6 +1153,128 @@ export default function App() {
     };
   };
 
+  // --- Login / Logout & Installer Provisioning ---
+  const handleLoginSuccess = (user: AppAuthUser) => {
+    setCurrentUser(user);
+    setViewingPublicWeb(false);
+    setActiveBuildingId(user.buildingId);
+    setCurrentRole(user.role);
+    setResidentPin(user.personalPin);
+    if (user.role === 'installer') {
+      setActiveScreen('installer');
+    } else if (user.role === 'building_admin') {
+      setActiveScreen('panel-admin');
+    } else {
+      setActiveScreen('app-residente');
+      setResidentTab('inicio');
+    }
+    window.scrollTo({ top: 0 });
+  };
+
+  const handleLogout = () => {
+    setCurrentUser(null);
+    setViewingPublicWeb(false);
+    window.scrollTo({ top: 0 });
+  };
+
+  const handleCreateBuilding = (buildingData: Omit<BuildingRecord, 'id'>): string => {
+    const newId = `bldg-${Date.now()}`;
+    const created: BuildingRecord = { ...buildingData, id: newId };
+    setBuildings((prev) => [created, ...prev]);
+    void syncBuildingToSupabase(created);
+    handleLogActivity({
+      title: `Nuevo edificio creado: ${created.name}`,
+      subtitle: `${created.address} · Akuvox E12W ${created.akuvoxIp} · Radio GPS ${created.geofenceRadiusMeters}m`,
+      time: nowTime(),
+      category: 'admin',
+    });
+    return newId;
+  };
+
+  const handleBatchCreateUnits = (
+    buildingId: string,
+    items: Array<{ unitNumber: string; floor: number; towerBlock?: string }>
+  ): number => {
+    const existingSet = new Set(
+      units
+        .filter((u) => u.buildingId === buildingId)
+        .map((u) => u.unitNumber.toUpperCase())
+    );
+    const toInsert: BuildingUnit[] = [];
+    for (const item of items) {
+      const code = item.unitNumber.trim().toUpperCase();
+      if (!code || existingSet.has(code)) continue;
+      existingSet.add(code);
+      const unitObj: BuildingUnit = {
+        id: `unit-${Date.now()}-${code}-${Math.floor(Math.random() * 999)}`,
+        buildingId,
+        unitNumber: code,
+        floor: item.floor,
+        towerBlock: item.towerBlock,
+        isOccupied: false,
+      };
+      toInsert.push(unitObj);
+      void syncUnitToSupabase(unitObj);
+    }
+    if (toInsert.length > 0) {
+      setUnits((prev) => [...prev, ...toInsert]);
+      handleLogActivity({
+        title: `Instalador generó ${toInsert.length} apartamentos`,
+        subtitle: `Edificio ${buildingId} (${toInsert.slice(0, 4).map((u) => u.unitNumber).join(', ')}...)`,
+        time: nowTime(),
+        category: 'admin',
+      });
+    }
+    return toInsert.length;
+  };
+
+  const handleDeleteUnit = (unitId: string) => {
+    setUnits((prev) => prev.filter((u) => u.id !== unitId));
+  };
+
+  const handleCreateAuthUser = (params: {
+    fullName: string;
+    email: string;
+    password: string;
+    role: AppAuthUser['role'];
+    buildingId: string;
+    unit?: string;
+    phone: string;
+  }) => {
+    const pin = String(Math.floor(1000 + Math.random() * 8999));
+    const roleLabels: Record<AppAuthUser['role'], string> = {
+      installer: 'Instalador',
+      building_admin: 'Administrador',
+      owner: 'Propietario',
+      tenant: 'Inquilino',
+    };
+    const newUser: AppAuthUser = {
+      id: `auth-${Date.now()}`,
+      email: params.email,
+      password: params.password,
+      fullName: params.fullName,
+      role: params.role,
+      roleLabel: roleLabels[params.role],
+      buildingId: params.buildingId,
+      unit: params.unit,
+      phone: params.phone,
+      personalPin: pin,
+      duressPin: computeDuressPin(pin),
+    };
+    setAuthUsers((prev) => [...prev, newUser]);
+
+    if (params.unit) {
+      handleAddTenant(params.unit, params.fullName, params.phone, params.role, params.email);
+    } else {
+      handleLogActivity({
+        title: `Cuenta creada: ${params.fullName} (${roleLabels[params.role]})`,
+        subtitle: `${params.email} · Habilitado en Login`,
+        time: nowTime(),
+        category: 'admin',
+      });
+    }
+  };
+
   // --- Admin Panel Actions ---
   const handleAddUnit = (unitNumber: string, floor: number, towerBlock?: string) => {
     const created: BuildingUnit = {
@@ -1353,13 +1486,53 @@ export default function App() {
     );
   }
 
+  // Unified Login Screen FIRST on App / APK entry
+  if (!currentUser && !viewingPublicWeb) {
+    return (
+      <LoginView
+        users={authUsers}
+        onLoginSuccess={handleLoginSuccess}
+        onOpenWebLanding={() => {
+          setViewingPublicWeb(true);
+          setActiveScreen('web-principal');
+        }}
+      />
+    );
+  }
+
   return (
     <div className="min-h-screen flex flex-col bg-surface text-on-surface font-body">
       <SiteHeader
         activeScreen={activeScreen}
+        currentUser={currentUser}
         openAlertsCount={openAlertsCount}
         onNavigate={handleNavigate}
+        onLogout={handleLogout}
+        onShowLogin={() => setViewingPublicWeb(false)}
       />
+
+      {activeScreen === 'installer' && (
+        <InstallerView
+          buildings={buildings}
+          activeBuildingId={activeBuildingId}
+          onChangeActiveBuilding={setActiveBuildingId}
+          units={units}
+          authUsers={authUsers}
+          akuvoxConfig={akuvoxConfig}
+          recurringPasses={recurringPasses}
+          onChangeAkuvoxConfig={setAkuvoxConfig}
+          onTestAkuvoxDoorRelay={async () => {
+            setDoor1Countdown(8);
+            await dispatchHardwareRelay(1);
+          }}
+          onUpdateLiveSnapshot={setLiveSnapshotUrl}
+          onCreateBuilding={handleCreateBuilding}
+          onBatchCreateUnits={handleBatchCreateUnits}
+          onDeleteUnit={handleDeleteUnit}
+          onCreateAuthUser={handleCreateAuthUser}
+          onNavigate={handleNavigate}
+        />
+      )}
 
       {activeScreen === 'web-principal' && (
         <WebPrincipalView
@@ -1409,6 +1582,8 @@ export default function App() {
 
       {activeScreen === 'app-residente' && (
         <AppResidenteView
+          currentUser={currentUser}
+          activeBuilding={activeBuilding}
           activeTab={residentTab}
           onChangeTab={setResidentTab}
           passes={passes}

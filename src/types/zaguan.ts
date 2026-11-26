@@ -1,11 +1,33 @@
 export type MainScreen =
-  | 'web-principal'
-  | 'portero-ia'
-  | 'app-residente'
+  | 'installer'
   | 'panel-admin'
+  | 'app-residente'
+  | 'portero-ia'
+  | 'web-principal'
   | 'modulo-retrofit';
 
-export type UserRole = 'super_admin' | 'building_admin' | 'resident' | 'staff';
+export type UserRole =
+  | 'installer'
+  | 'super_admin'
+  | 'building_admin'
+  | 'owner'
+  | 'tenant'
+  | 'resident'
+  | 'staff';
+
+export interface AppAuthUser {
+  id: string;
+  email: string;
+  password: string;
+  fullName: string;
+  role: 'installer' | 'building_admin' | 'owner' | 'tenant';
+  roleLabel: string;
+  buildingId: string;
+  unit?: string;
+  phone: string;
+  personalPin: string;
+  duressPin: string;
+}
 
 export type AccessPassType = 'one_time' | 'recurring_schedule' | 'permanent';
 

@@ -1,6 +1,7 @@
 import {
   AccessLogRecord,
   ActivityEvent,
+  AppAuthUser,
   BrandCompatibilityInfo,
   BuildingNotice,
   BuildingRecord,
@@ -365,6 +366,59 @@ export const INITIAL_ACTIVITY: ActivityEvent[] = [
 
 const todayKey = new Date().toISOString().slice(0, 10);
 const yesterdayKey = new Date(Date.now() - 86400000).toISOString().slice(0, 10);
+
+export const INITIAL_DEMO_USERS: AppAuthUser[] = [
+  {
+    id: 'auth-installer-1',
+    email: 'instalador@zaguan.uy',
+    password: 'zaguan2026',
+    fullName: 'Simón Fleitas (Instalador)',
+    role: 'installer',
+    roleLabel: 'Instalador',
+    buildingId: 'bldg-pocitos-2468',
+    phone: '+598 97 999 561',
+    personalPin: '9901',
+    duressPin: '9910',
+  },
+  {
+    id: 'auth-admin-1',
+    email: 'admin@zaguan.uy',
+    password: 'zaguan2026',
+    fullName: 'Laura Gómez (Administración)',
+    role: 'building_admin',
+    roleLabel: 'Administrador',
+    buildingId: 'bldg-pocitos-2468',
+    phone: '+598 99 100 200',
+    personalPin: '8802',
+    duressPin: '8820',
+  },
+  {
+    id: 'auth-owner-1',
+    email: 'propietario@zaguan.uy',
+    password: 'zaguan2026',
+    fullName: 'Martín Silva',
+    role: 'owner',
+    roleLabel: 'Propietario',
+    buildingId: 'bldg-pocitos-2468',
+    unit: '4B',
+    phone: '+598 99 312 402',
+    personalPin: '4028',
+    duressPin: '4082',
+  },
+  {
+    id: 'auth-tenant-1',
+    email: 'inquilino@zaguan.uy',
+    password: 'zaguan2026',
+    fullName: 'Carolina Vega',
+    role: 'tenant',
+    roleLabel: 'Inquilino',
+    buildingId: 'bldg-pocitos-2468',
+    unit: '3A',
+    phone: '+598 98 640 301',
+    personalPin: '3019',
+    duressPin: '3091',
+  },
+];
 
 export const INITIAL_BUILDINGS: BuildingRecord[] = [
   {

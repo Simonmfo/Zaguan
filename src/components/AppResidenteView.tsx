@@ -15,7 +15,9 @@ import {
 } from '../services/nfcHceService';
 import {
   ActivityEvent,
+  AppAuthUser,
   BuildingNotice,
+  BuildingRecord,
   DayOfWeek,
   InicioSubTab,
   MainScreen,
@@ -43,6 +45,8 @@ import { QrPreviewSvg } from './QrPreviewSvg';
 type AccessSubTab = 'un-uso' | 'recurrentes' | 'coaccion';
 
 interface AppResidenteViewProps {
+  currentUser?: AppAuthUser | null;
+  activeBuilding?: BuildingRecord;
   activeTab: ResidentTab;
   onChangeTab: (tab: ResidentTab) => void;
   passes: QrPass[];
@@ -92,6 +96,8 @@ interface AppResidenteViewProps {
 const ALL_DAYS: DayOfWeek[] = ['L', 'M', 'X', 'J', 'V', 'S', 'D'];
 
 export function AppResidenteView({
+  currentUser,
+  activeBuilding,
   activeTab,
   onChangeTab,
   passes,
@@ -464,7 +470,11 @@ export function AppResidenteView({
           ? 'Edificio'
           : 'Zaguán App';
 
-  const residentHceUid = buildResidentHceUid(BUILDING_INFO.activeUnit, residentPin);
+  const activeUnitCode = currentUser?.unit || BUILDING_INFO.activeUnit;
+  const activeResidentName = currentUser?.fullName || BUILDING_INFO.activeResident;
+  const activeBuildingName = activeBuilding?.name || BUILDING_INFO.name;
+  const activeRoleBadge = currentUser?.roleLabel || 'Residente';
+  const residentHceUid = buildResidentHceUid(activeUnitCode, residentPin);
 
   return (
     <main className="flex-1 bg-surface-container-low">
@@ -478,14 +488,14 @@ export function AppResidenteView({
                 <ZaguanLogoMark className="w-8 h-8 shrink-0" />
                 <div className="flex flex-col min-w-0">
                   <span className="font-label text-label-sm text-on-surface-variant truncate">
-                    {BUILDING_INFO.name} · Apto {BUILDING_INFO.activeUnit} ({BUILDING_INFO.activeResident})
+                    {activeBuildingName} · Apto {activeUnitCode} ({activeResidentName})
                   </span>
                   <div className="flex items-center gap-2">
                     <h1 className="font-headline text-title-lg text-on-surface whitespace-nowrap">
                       {headerTitle}
                     </h1>
                     <span className="inline-flex items-center px-2 py-0.5 rounded-sm bg-success-container text-on-success-container font-label text-label-sm whitespace-nowrap shrink-0">
-                      E12W
+                      {activeRoleBadge}
                     </span>
                   </div>
                 </div>
@@ -1655,6 +1665,33 @@ export function AppResidenteView({
               {/* TAB 4: EDIFICIO / COMUNICADOS */}
               {activeTab === 'consorcio' && (
                 <>
+                  {currentUser?.role === 'owner' && (
+                    <section className="bg-surface-container-lowest border border-primary/40 rounded-md p-3.5 flex flex-col gap-2">
+                      <div className="flex items-center justify-between">
+                        <h2 className="font-title text-title-md text-primary">
+                          Panel Propietario · Apto {activeUnitCode}
+                        </h2>
+                        <span className="font-mono text-[11px] px-2 py-0.5 rounded bg-surface-variant text-primary">
+                          Titular
+                        </span>
+                      </div>
+                      <p className="font-body text-body-sm text-on-surface-variant">
+                        Como propietario podés auditar accesos de tu unidad, descargar certificados
+                        Ley 18.251 (BPS/DGI/BSE) y solicitar cambio de inquilino a la
+                        administración.
+                      </p>
+                      <button
+                        type="button"
+                        onClick={() =>
+                          showFeedback('Certificados Ley 18.251 (BPS, DGI, BSE) descargados al día')
+                        }
+                        className="self-start px-3 py-1.5 rounded bg-primary text-on-primary font-label text-label-sm cursor-pointer"
+                      >
+                        Descargar documentación consorcio
+                      </button>
+                    </section>
+                  )}
+
                   <section className="bg-surface-container-lowest border border-outline-variant rounded-md p-3.5 flex flex-col gap-2.5">
                     <h2 className="font-title text-title-md text-on-surface">Comunicados Oficiales</h2>
                     <div className="divide-y divide-outline-variant">
