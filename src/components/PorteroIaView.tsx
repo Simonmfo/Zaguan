@@ -3,12 +3,10 @@ import { ASSETS, BUILDING_INFO } from '../data/zaguanData';
 import { buildAkuvoxRtspUrl } from '../services/akuvoxService';
 import {
   getLuciaActiveVoiceLabel,
-  getLuciaApprovedReply,
-  getLuciaGreeting,
-  getLuciaPackageCallReply,
-  getLuciaRejectedReply,
-  getLuciaVisitCallReply,
-  speakAsLucia,
+  LuciaClipCategory,
+  pickLuciaClip,
+  playIntercomChime,
+  playLuciaClipFile,
   stopLuciaSpeech,
   unlockLuciaAudio,
 } from '../services/luciaVoiceService';
@@ -232,11 +230,14 @@ export function PorteroIaView({
   const nowTime = () =>
     new Date().toLocaleTimeString('es-UY', { hour: '2-digit', minute: '2-digit' });
 
-  const speakText = (text: string) => {
-    if (!voiceEnabledRef.current) return;
-    void speakAsLucia(text, (info) => {
-      setLuciaVoiceLabel(info.label);
-    });
+  const playRecordedCategory = (category: LuciaClipCategory): string => {
+    const clip = pickLuciaClip(category);
+    if (voiceEnabledRef.current) {
+      void playLuciaClipFile(clip.file, (info) => {
+        setLuciaVoiceLabel(info.label);
+      });
+    }
+    return clip.text;
   };
 
   useEffect(() => {
@@ -250,17 +251,16 @@ export function PorteroIaView({
           } else {
             onRespondVisit(true);
           }
-          const msg = getLuciaApprovedReply(resp.unit, isPkg);
+          const spoken = playRecordedCategory(isPkg ? 'package-approved' : 'visit-approved');
           setChatLog((prev) => [
             ...prev,
-            { id: `remote-${Date.now()}`, sender: 'ia', text: msg, time: nowTime() },
+            { id: `remote-${Date.now()}`, sender: 'ia', text: `${spoken} (Apto ${resp.unit})`, time: nowTime() },
           ]);
           setRemoteRingStatus(
             isPkg
               ? `Celular aceptó paquete (Apto ${resp.unit}) → Hall/Zaguán abierto`
               : `Celular aprobó ingreso (Apto ${resp.unit}) → Puerta abierta`
           );
-          speakText(msg);
         } else if (resp.action === 'reject' || resp.action === 'reject_package') {
           const isPkg = resp.action === 'reject_package';
           if (isPkg) {
@@ -268,25 +268,26 @@ export function PorteroIaView({
           } else {
             onRespondVisit(false);
           }
-          const msg = getLuciaRejectedReply(resp.unit, isPkg);
+          const spoken = playRecordedCategory(isPkg ? 'package-rejected' : 'visit-rejected');
           setChatLog((prev) => [
             ...prev,
-            { id: `remote-${Date.now()}`, sender: 'ia', text: msg, time: nowTime() },
+            { id: `remote-${Date.now()}`, sender: 'ia', text: `${spoken} (Apto ${resp.unit})`, time: nowTime() },
           ]);
           setRemoteRingStatus(
             isPkg
               ? `Celular rechazó el paquete (Apto ${resp.unit})`
               : `Celular rechazó el ingreso (Apto ${resp.unit})`
           );
-          speakText(msg);
         } else if (resp.action === 'talk' && resp.message) {
           const msg = `Del ${resp.unit} te dicen: ${resp.message}`;
           setChatLog((prev) => [
             ...prev,
             { id: `remote-talk-${Date.now()}`, sender: 'ia', text: msg, time: nowTime() },
           ]);
-          setRemoteRingStatus(`Audio recibido desde el celular (${resp.unit})`);
-          speakText(msg);
+          setRemoteRingStatus(`Mensaje recibido desde el celular (${resp.unit})`);
+          if (voiceEnabledRef.current) {
+            playIntercomChime();
+          }
         }
       },
       (connected) => setRemoteConnected(connected)
@@ -447,13 +448,13 @@ export function PorteroIaView({
     }
   };
 
-  const pushBubble = (sender: 'ia' | 'visitante', text: string) => {
+  const pushBubble = (sender: 'ia' | 'visitante', text: string, audioCategory?: LuciaClipCategory) => {
     setChatLog((prev) => [
       ...prev,
       { id: `msg-${Date.now()}-${Math.random()}`, sender, text, time: nowTime() },
     ]);
-    if (sender === 'ia') {
-      speakText(text);
+    if (sender === 'ia' && audioCategory) {
+      playRecordedCategory(audioCategory);
     }
   };
 
@@ -465,11 +466,11 @@ export function PorteroIaView({
       onLogAkuvoxProtocol(
         'sip',
         `SIP INVITE sip:lucia@${akuvoxConfig.sipServerIp} (G.722 + AEC)`,
-        'Botón físico E12W presionado → Audio bidireccional conectado a LucIA (Voz Uruguaya)',
+        'Botón físico E12W presionado → Audio local LucIA (100% grabado, sin Gemini)',
         akuvoxConfig.enabled ? 'ok' : 'simulated'
       );
     }
-    const greeting = getLuciaGreeting();
+    const greeting = playRecordedCategory('greeting');
     setChatLog([
       {
         id: `msg-greet-${Date.now()}`,
@@ -478,7 +479,6 @@ export function PorteroIaView({
         time: nowTime(),
       },
     ]);
-    speakText(greeting);
   };
 
   const processNaturalUtterance = (raw: string) => {
@@ -506,21 +506,24 @@ export function PorteroIaView({
       const simDay: DayOfWeek = simScheduleSlot === 'allowed' ? 'M' : 'L';
       const simHour = simScheduleSlot === 'allowed' ? '09:30' : '19:00';
       const res = onValidatePinOrQr(spokenCode, simDay, simHour);
-      pushBubble('ia', res.message);
+      pushBubble('ia', res.message, res.ok ? 'code-valid' : 'code-invalid');
       setPinFeedback({ ok: res.ok, text: res.message });
       return;
     }
 
-    // 1. Check if it's a parcel / delivery utterance
+    // 1. Check if it's a parcel / delivery utterance (local deterministic parser, zero AI)
     const isParcel =
       lower.includes('paquete') ||
       lower.includes('entrega') ||
       lower.includes('mercado libre') ||
       lower.includes('mercadolibre') ||
       lower.includes('pedidosya') ||
+      lower.includes('pedidos ya') ||
       lower.includes('correo') ||
       lower.includes('dac') ||
-      lower.includes('repartidor');
+      lower.includes('repartidor') ||
+      lower.includes('envío') ||
+      lower.includes('envio');
 
     if (isParcel) {
       const unitMatch = text.match(/\b([1-9][a-dA-D]|[1-9]\d{2})\b/);
@@ -547,8 +550,8 @@ export function PorteroIaView({
                 : 'Paquetería');
 
       // SIEMPRE notificar al celular del residente para confirmar si recibe el paquete o no
-      const reply = getLuciaPackageCallReply(carrier, unit);
-      pushBubble('ia', reply);
+      const clipText = playRecordedCategory('package');
+      pushBubble('ia', `${clipText} (${carrier} · Apto ${unit})`);
 
       if (hardwareModel === 'akuvox-e12w') {
         onLogAkuvoxProtocol(
@@ -576,9 +579,30 @@ export function PorteroIaView({
       return;
     }
 
-    // 2. Visitor validation (never opens alone!)
+    // 2. Visitor validation (100% deterministic local parser, never opens alone!)
     const unitMatch = text.match(/\b([1-9][a-dA-D]|[1-9]\d{2})\b/);
-    const unit = unitMatch ? unitMatch[1].toUpperCase() : BUILDING_INFO.activeUnit;
+    const hasResidentHint =
+      Boolean(unitMatch) ||
+      lower.includes('martín') ||
+      lower.includes('martin') ||
+      lower.includes('carolina') ||
+      lower.includes('roberto') ||
+      lower.includes('vengo') ||
+      lower.includes('visita') ||
+      lower.includes('hola') ||
+      lower.includes('soy');
+
+    if (!hasResidentHint) {
+      const repeatText = playRecordedCategory('ask-repeat');
+      pushBubble('ia', repeatText);
+      return;
+    }
+
+    const unit = unitMatch
+      ? unitMatch[1].toUpperCase()
+      : lower.includes('carolina')
+        ? '3A'
+        : BUILDING_INFO.activeUnit;
 
     const soyMatch = text.match(/soy\s+([A-ZÁÉÍÓÚÑa-záéíóúñ]+)/i);
     const visitorName = soyMatch ? soyMatch[1] : 'Simón';
@@ -587,8 +611,8 @@ export function PorteroIaView({
     const defaultResident = unit === '3A' ? 'Carolina' : 'Martín';
     const residentName = verMatch ? verMatch[1] : defaultResident;
 
-    const reply = getLuciaVisitCallReply(visitorName, residentName, unit);
-    pushBubble('ia', reply);
+    const clipText = playRecordedCategory('visit');
+    pushBubble('ia', `${clipText} (${residentName} · Apto ${unit})`);
     if (hardwareModel === 'akuvox-e12w') {
       onLogAkuvoxProtocol(
         'rtsp',
@@ -643,7 +667,7 @@ export function PorteroIaView({
 
     const res = onValidatePinOrQr(code, simDay, simHour);
     setPinFeedback({ ok: res.ok, text: res.message });
-    speakText(res.message);
+    playRecordedCategory(res.ok ? 'code-valid' : 'code-invalid');
     if (!codeOverride) setPinInput('');
   };
 
@@ -653,7 +677,7 @@ export function PorteroIaView({
     if (hardwareModel === 'akuvox-e12w') {
       onLogAkuvoxProtocol(
         'rtsp',
-        `POST /api/packages/validate-frame (Snapshot E12W → Gemini Vision)`,
+        `POST /api/packages/validate-frame (Snapshot E12W → OCR Local)`,
         `Leyendo etiqueta ${matchedPreAuth.carrier} · Apto ${matchedPreAuth.unit}`,
         akuvoxConfig.enabled ? 'ok' : 'simulated'
       );
@@ -661,11 +685,7 @@ export function PorteroIaView({
     setTimeout(() => {
       setOcrPhase('deposited');
       onCompletePreAuthParcel(matchedPreAuth.id, storageMode);
-      const zoneText =
-        storageMode === 'locker'
-          ? 'Se abrió el Locker inteligente #B2. Depositá el paquete y cerrá la compuerta.'
-          : 'Se desbloqueó el Relé 1 (Zaguán de paquetería). La puerta al hall permanece bloqueada. Foto comprobante enviada al residente.';
-      speakText(zoneText);
+      playRecordedCategory('package-approved');
     }, 850);
   };
 
@@ -678,9 +698,9 @@ export function PorteroIaView({
     setVisionScanning(true);
     onLogAkuvoxProtocol(
       'rtsp',
-      'POST /api/packages/validate-frame (Akuvox E12W → Visión Multimodal)',
+      'POST /api/packages/validate-frame (Akuvox E12W → OCR)',
       params.imageBase64
-        ? 'Analizando foto real de etiqueta con Gemini 2.5 Flash Vision'
+        ? 'Analizando foto de etiqueta'
         : `Analizando etiqueta: "${params.simulatedLabelText}"`,
       akuvoxConfig.enabled ? 'ok' : 'simulated'
     );
@@ -690,8 +710,8 @@ export function PorteroIaView({
     const detectedUnit = decision.extraction.unitNumber || BUILDING_INFO.activeUnit;
     const detectedCarrier = decision.extraction.carrier || 'Paquetería';
     const detectedResident = decision.extraction.recipientName || (detectedUnit === '3A' ? 'Carolina' : 'Martín');
-    const shortReply = getLuciaPackageCallReply(detectedCarrier, detectedUnit);
-    pushBubble('ia', shortReply);
+    const shortReply = playRecordedCategory('package');
+    pushBubble('ia', `${shortReply} (${detectedCarrier} · Apto ${detectedUnit})`);
     void dispatchRingToAndroidPhone({
       kind: 'package',
       visitorName: `Repartidor ${detectedCarrier}`,
@@ -1266,11 +1286,10 @@ export function PorteroIaView({
                     <button
                       type="button"
                       onClick={() => {
-                        startAiCall();
-                        pushBubble(
-                          'ia',
-                          'Modo asistencia por voz: quedate tranquilo que no necesitás app. Acercá tu código QR a la cámara de arriba o decime tu número de documento despacio.'
-                        );
+                        unlockLuciaAudio();
+                        setMode('ia-voz');
+                        const helpText = playRecordedCategory('elderly-help');
+                        pushBubble('ia', helpText);
                       }}
                       className="px-2.5 py-1 rounded bg-sky-500/20 hover:bg-sky-500/30 font-label text-label-sm text-sky-200 cursor-pointer"
                     >

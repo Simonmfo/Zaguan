@@ -1,0 +1,115 @@
+{
+  "generatedAt": "2026-11-26T17:54:53.059Z",
+  "clips": {
+    "greeting-1": {
+      "file": "/audio/lucia/greeting-1.m4a",
+      "category": "greeting",
+      "text": "¡Hola! Soy Lucía. ¿A qué apartamento venís o traés algún paquete?"
+    },
+    "greeting-2": {
+      "file": "/audio/lucia/greeting-2.m4a",
+      "category": "greeting",
+      "text": "¡Buenas! Hablás con Lucía. Decime a qué apartamento venís o si es una entrega."
+    },
+    "greeting-3": {
+      "file": "/audio/lucia/greeting-3.m4a",
+      "category": "greeting",
+      "text": "¡Hola, qué tal! Soy Lucía, ¿con quién venís o a qué apartamento?"
+    },
+    "greeting-4": {
+      "file": "/audio/lucia/greeting-4.m4a",
+      "category": "greeting",
+      "text": "¡Buenas! Soy Lucía del edificio. ¿A qué apartamento venís?"
+    },
+    "visit-1": {
+      "file": "/audio/lucia/visit-1.m4a",
+      "category": "visit",
+      "text": "Dale, dame un minuto que ya llamo para que te atiendan."
+    },
+    "visit-2": {
+      "file": "/audio/lucia/visit-2.m4a",
+      "category": "visit",
+      "text": "Bárbaro, aguantá un toque que ya le aviso al residente."
+    },
+    "visit-3": {
+      "file": "/audio/lucia/visit-3.m4a",
+      "category": "visit",
+      "text": "Perfecto, dame un segundito que ahí les mando aviso al celular."
+    },
+    "visit-4": {
+      "file": "/audio/lucia/visit-4.m4a",
+      "category": "visit",
+      "text": "Genial, ya les toqué timbre en la aplicación, esperá un toque."
+    },
+    "package-1": {
+      "file": "/audio/lucia/package-1.m4a",
+      "category": "package",
+      "text": "Bárbaro, dame un minuto que ya le aviso al celular por el paquete."
+    },
+    "package-2": {
+      "file": "/audio/lucia/package-2.m4a",
+      "category": "package",
+      "text": "Dale, aguantá un toque que ahí le notifico al residente para ver si lo reciben."
+    },
+    "package-3": {
+      "file": "/audio/lucia/package-3.m4a",
+      "category": "package",
+      "text": "Perfecto, ya mandé aviso al celular por la entrega, esperá un segundito."
+    },
+    "package-4": {
+      "file": "/audio/lucia/package-4.m4a",
+      "category": "package",
+      "text": "Genial, ahí consulto en el apartamento para que confirmen el paquete."
+    },
+    "visit-approved-1": {
+      "file": "/audio/lucia/visit-approved-1.m4a",
+      "category": "visit-approved",
+      "text": "¡Listo! Ya te abrieron desde el celular, pasá tranquilo."
+    },
+    "visit-approved-2": {
+      "file": "/audio/lucia/visit-approved-2.m4a",
+      "category": "visit-approved",
+      "text": "¡Impecable! Puerta abierta, pasá nomás."
+    },
+    "package-approved-1": {
+      "file": "/audio/lucia/package-approved-1.m4a",
+      "category": "package-approved",
+      "text": "¡Listo! Aceptaron el paquete, ya te abrí el hall para dejarlo."
+    },
+    "package-approved-2": {
+      "file": "/audio/lucia/package-approved-2.m4a",
+      "category": "package-approved",
+      "text": "¡Bárbaro! Confirmaron la entrega, podés pasar a dejar el paquete."
+    },
+    "visit-rejected-1": {
+      "file": "/audio/lucia/visit-rejected-1.m4a",
+      "category": "visit-rejected",
+      "text": "Disculpá, avisaron que ahora no pueden atender."
+    },
+    "package-rejected-1": {
+      "file": "/audio/lucia/package-rejected-1.m4a",
+      "category": "package-rejected",
+      "text": "Disculpá, avisaron que no pueden recibir ese paquete ahora."
+    },
+    "code-valid-1": {
+      "file": "/audio/lucia/code-valid-1.m4a",
+      "category": "code-valid",
+      "text": "¡Perfecto! Código verificado, ya te abrí la puerta, pasá nomás."
+    },
+    "code-invalid-1": {
+      "file": "/audio/lucia/code-invalid-1.m4a",
+      "category": "code-invalid",
+      "text": "Disculpá, ese código no está activo o ya venció. Decime a qué apartamento venís."
+    },
+    "ask-repeat-1": {
+      "file": "/audio/lucia/ask-repeat-1.m4a",
+      "category": "ask-repeat",
+      "text": "Disculpá, no te escuché bien. ¿Me repetís a qué apartamento venís?"
+    },
+    "elderly-help-1": {
+      "file": "/audio/lucia/elderly-help-1.m4a",
+      "category": "elderly-help",
+      "text": "Quedate tranquilo que no necesitás celular. Decime tu nombre y a qué apartamento venís que ya les aviso."
+    }
+  }
+}

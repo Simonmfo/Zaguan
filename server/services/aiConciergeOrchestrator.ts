@@ -246,7 +246,9 @@ export async function handleConciergeUtterance(
   utterance: string,
   ctx: ConciergeContext
 ): Promise<ConciergeTurnResult> {
-  const apiKey = process.env.GEMINI_API_KEY;
+  // Por defecto corre 100% local (sin Gemini para procesar voz del visitante).
+  // Solo usa Gemini si se habilita explícitamente CONCIERGE_USE_GEMINI=true.
+  const apiKey = process.env.CONCIERGE_USE_GEMINI === 'true' ? process.env.GEMINI_API_KEY : undefined;
   const toolCalls: ConciergeToolExecution[] = [];
   let doorOpened = false;
   let snapshotDataUrl: string | undefined;
