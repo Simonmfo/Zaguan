@@ -44,6 +44,7 @@ class _ResidentShellState extends State<ResidentShell> {
   // Hablar en Timbre E12W
   bool _showTalkInput = false;
   final _talkCtrl = TextEditingController();
+  final _channelCtrl = TextEditingController(text: 'pocitos-2468');
 
   @override
   void dispose() {
@@ -54,6 +55,7 @@ class _ResidentShellState extends State<ResidentShell> {
     _pkgDescCtrl.dispose();
     _pkgWindowCtrl.dispose();
     _talkCtrl.dispose();
+    _channelCtrl.dispose();
     super.dispose();
   }
 
@@ -372,26 +374,117 @@ class _ResidentShellState extends State<ResidentShell> {
         ),
         const SizedBox(height: 10),
 
-        // Simular Timbre en Vivo E12W
+        // Timbre en Vivo LucIA (Notificación Android Real + Llamado Remoto desde Web)
         Card(
           color: const Color(0xFFF0F4F8),
-          child: ListTile(
-            leading: const CircleAvatar(
-              backgroundColor: Color(0xFF002547),
-              foregroundColor: Colors.white,
-              child: Icon(Icons.ring_volume),
-            ),
-            title: const Text(
-              'Probar Timbre en Vivo (Akuvox E12W)',
-              style: TextStyle(fontWeight: FontWeight.w800, fontSize: 14),
-            ),
-            subtitle: const Text(
-              'Simula una visita tocando el timbre con cámara en vivo, Abrir, Hablar y Rechazar.',
-              style: TextStyle(fontSize: 12),
-            ),
-            trailing: FilledButton(
-              onPressed: store.simulateDoorbellCall,
-              child: const Text('Simular'),
+          child: Padding(
+            padding: const EdgeInsets.all(14),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Row(
+                  children: [
+                    const CircleAvatar(
+                      backgroundColor: Color(0xFF002547),
+                      foregroundColor: Colors.white,
+                      child: Icon(Icons.ring_volume),
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const Text(
+                            'Timbre LucIA (Web ↔ Celular)',
+                            style: TextStyle(fontWeight: FontWeight.w800, fontSize: 14),
+                          ),
+                          Text(
+                            store.remoteDoorbellConnected
+                                ? '● Conectado en vivo · Canal: ${store.doorbellChannel}'
+                                : '○ Conectando canal ${store.doorbellChannel}...',
+                            style: TextStyle(
+                              fontSize: 12,
+                              fontWeight: FontWeight.w700,
+                              color: store.remoteDoorbellConnected
+                                  ? const Color(0xFF076C41)
+                                  : const Color(0xFFB45309),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 10),
+                const Text(
+                  'Cuando llames al videoportero LucIA desde la Web usando el mismo canal, te sonará una notificación real en este celular Android.',
+                  style: TextStyle(fontSize: 12, color: Color(0xFF43474F)),
+                ),
+                const SizedBox(height: 10),
+                Row(
+                  children: [
+                    Expanded(
+                      child: TextField(
+                        controller: _channelCtrl,
+                        decoration: const InputDecoration(
+                          labelText: 'Canal Web ↔ Celular',
+                          border: OutlineInputBorder(),
+                          isDense: true,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    FilledButton.tonal(
+                      onPressed: () {
+                        store.updateDoorbellChannel(_channelCtrl.text);
+                        _snack('Canal de timbre actualizado a: ${store.doorbellChannel}');
+                      },
+                      child: const Text('Conectar'),
+                    ),
+                  ],
+                ),
+                SwitchListTile(
+                  contentPadding: EdgeInsets.zero,
+                  dense: true,
+                  title: const Text(
+                    'Recibir timbres de cualquier apto (modo prueba)',
+                    style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600),
+                  ),
+                  value: store.acceptAllUnitsForTesting,
+                  onChanged: store.toggleAcceptAllUnitsForTesting,
+                ),
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: [
+                    FilledButton.icon(
+                      onPressed: store.simulateDoorbellCall,
+                      icon: const Icon(Icons.notifications_active, size: 16),
+                      label: const Text('Probar ahora'),
+                    ),
+                    FilledButton.tonalIcon(
+                      onPressed: () async {
+                        await store.scheduleDelayedDoorbellTest(delaySeconds: 5);
+                        _snack('Notificación programada en 5 seg. ¡Podés minimizar o bloquear la pantalla!');
+                      },
+                      icon: const Icon(Icons.timer, size: 16),
+                      label: const Text('Probar en 5s'),
+                    ),
+                    OutlinedButton.icon(
+                      onPressed: () async {
+                        final ok = await store.requestAndroidNotificationPermission();
+                        _snack(
+                          ok
+                              ? 'Permiso de notificaciones Android activo.'
+                              : 'Aceptá el permiso de notificaciones en el aviso de Android.',
+                        );
+                      },
+                      icon: const Icon(Icons.settings_applications, size: 16),
+                      label: const Text('Permiso'),
+                    ),
+                  ],
+                ),
+              ],
             ),
           ),
         ),
@@ -1099,7 +1192,7 @@ class _ResidentShellState extends State<ResidentShell> {
                             borderRadius: BorderRadius.circular(999),
                           ),
                           child: const Text(
-                            '● TIMBRE EN VIVO · E12W',
+                            '● TIMBRE EN VIVO · LUCÍA / E12W',
                             style: TextStyle(
                               color: Colors.white,
                               fontWeight: FontWeight.w800,
@@ -1166,7 +1259,7 @@ class _ResidentShellState extends State<ResidentShell> {
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           const Text(
-                            'Transcripción Portero IA:',
+                            'Transcripción LucIA (Portera Virtual):',
                             style: TextStyle(fontWeight: FontWeight.w800, fontSize: 12),
                           ),
                           const SizedBox(height: 4),

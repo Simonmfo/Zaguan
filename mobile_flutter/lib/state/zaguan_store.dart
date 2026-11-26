@@ -5,15 +5,23 @@ import 'package:flutter/foundation.dart';
 
 import '../models/zaguan_models.dart';
 import '../services/akuvox_dart_service.dart';
+import '../services/android_notification_service.dart';
+import '../services/doorbell_remote_service.dart';
 
 class ZaguanStore extends ChangeNotifier {
   ZaguanStore() {
     _seedInitialData();
     _expiryTimer = Timer.periodic(const Duration(seconds: 5), (_) => _expireElapsed());
+    AndroidNotificationService.attachTapListener(_handleDoorbellNotificationOpened);
   }
 
   Timer? _expiryTimer;
   final Random _rng = Random();
+  final DoorbellRemoteService _remoteDoorbell = DoorbellRemoteService();
+
+  String doorbellChannel = 'pocitos-2468';
+  bool remoteDoorbellConnected = false;
+  bool acceptAllUnitsForTesting = true;
 
   AppUser? currentUser;
   String activeBuildingId = 'bldg-pocitos-2468';
@@ -375,6 +383,8 @@ class ZaguanStore extends ChangeNotifier {
       if (u.email.toLowerCase() == clean && u.password == password && u.isActive) {
         currentUser = u;
         activeBuildingId = u.buildingId;
+        _startRemoteDoorbellListener();
+        AndroidNotificationService.requestPermission();
         notifyListeners();
         return u;
       }
@@ -383,9 +393,95 @@ class ZaguanStore extends ChangeNotifier {
   }
 
   void logout() {
+    _remoteDoorbell.stop();
+    remoteDoorbellConnected = false;
     currentUser = null;
     pendingDoorbell = null;
     pendingPackageAlert = null;
+    AndroidNotificationService.cancelDoorbellNotification();
+    notifyListeners();
+  }
+
+  void _startRemoteDoorbellListener() {
+    _remoteDoorbell.start(
+      channel: doorbellChannel,
+      onRing: _handleRemoteDoorbellEvent,
+      onConnectionChanged: (connected) {
+        if (remoteDoorbellConnected != connected) {
+          remoteDoorbellConnected = connected;
+          notifyListeners();
+        }
+      },
+    );
+  }
+
+  void updateDoorbellChannel(String rawChannel) {
+    doorbellChannel = DoorbellRemoteService.sanitizeChannel(rawChannel);
+    if (currentUser != null) {
+      _startRemoteDoorbellListener();
+    }
+    notifyListeners();
+  }
+
+  void toggleAcceptAllUnitsForTesting(bool value) {
+    acceptAllUnitsForTesting = value;
+    notifyListeners();
+  }
+
+  Future<bool> requestAndroidNotificationPermission() {
+    return AndroidNotificationService.requestPermission();
+  }
+
+  void _handleDoorbellNotificationOpened({
+    required String callId,
+    required String unit,
+    required String visitorName,
+    required String transcript,
+  }) {
+    pendingDoorbell = PendingDoorbellModel(
+      id: callId,
+      unit: unit,
+      residentName: currentUser?.fullName ?? 'Martín Silva',
+      visitorName: visitorName,
+      reasonTranscript: transcript,
+      timeLabel: _nowHm(),
+    );
+    notifyListeners();
+  }
+
+  void _handleRemoteDoorbellEvent(RemoteDoorbellEvent event) {
+    final user = currentUser;
+    if (user == null) return;
+    if (!acceptAllUnitsForTesting && user.unit != null && user.unit!.toUpperCase() != event.unit.toUpperCase()) {
+      return;
+    }
+
+    pendingDoorbell = PendingDoorbellModel(
+      id: event.id,
+      unit: event.unit,
+      residentName: user.fullName,
+      visitorName: event.visitorName,
+      reasonTranscript: event.transcript,
+      timeLabel: _nowHm(),
+    );
+
+    AndroidNotificationService.showDoorbellNotification(
+      title: '🔔 Timbre LucIA · Apto ${event.unit}',
+      body: '${event.visitorName} está en la puerta: "${event.transcript}"',
+      unit: event.unit,
+      visitorName: event.visitorName,
+      transcript: event.transcript,
+      callId: event.id,
+    );
+
+    _addLog(
+      buildingId: activeBuildingId,
+      unit: event.unit,
+      actorName: event.visitorName,
+      type: AccessEventType.aiVoice,
+      methodUsed: 'LucIA Web → Push Android',
+      notes: 'Timbre recibido desde videoportero Web: "${event.transcript}"',
+    );
     notifyListeners();
   }
 
@@ -932,33 +1028,73 @@ class ZaguanStore extends ChangeNotifier {
     notifyListeners();
   }
 
-  // --- Timbre en vivo Akuvox E12W ---
+  // --- Timbre en vivo Akuvox E12W / LucIA (con notificación nativa Android) ---
   void simulateDoorbellCall() {
+    final unit = currentUser?.unit ?? '4B';
+    final residentFirst = currentUser?.fullName.split(' ').first ?? 'Martín';
+    final callId = 'bell-${DateTime.now().millisecondsSinceEpoch}';
+    final transcript = 'Hola LucIA, vengo a ver a $residentFirst del $unit, soy Lucas.';
     pendingDoorbell = PendingDoorbellModel(
-      id: 'bell-${DateTime.now().millisecondsSinceEpoch}',
-      unit: currentUser?.unit ?? '4B',
+      id: callId,
+      unit: unit,
       residentName: currentUser?.fullName ?? 'Martín Silva',
       visitorName: 'Lucas Fernández',
-      reasonTranscript:
-          'Hola, vengo a ver a ${currentUser?.fullName.split(' ').first ?? 'Martín'} del ${currentUser?.unit ?? '4B'}, soy Lucas.',
+      reasonTranscript: transcript,
       timeLabel: _nowHm(),
     );
+    AndroidNotificationService.showDoorbellNotification(
+      title: '🔔 Timbre LucIA · Apto $unit',
+      body: 'Lucas Fernández está en la puerta: "$transcript"',
+      unit: unit,
+      visitorName: 'Lucas Fernández',
+      transcript: transcript,
+      callId: callId,
+    );
     notifyListeners();
+  }
+
+  Future<void> scheduleDelayedDoorbellTest({int delaySeconds = 5}) async {
+    final unit = currentUser?.unit ?? '4B';
+    final residentFirst = currentUser?.fullName.split(' ').first ?? 'Martín';
+    final callId = 'delayed-${DateTime.now().millisecondsSinceEpoch}';
+    final transcript = 'Hola LucIA, soy Simón, vengo a ver a $residentFirst del $unit.';
+    await AndroidNotificationService.scheduleDelayedDoorbell(
+      delaySeconds: delaySeconds,
+      title: '🔔 Timbre LucIA · Apto $unit',
+      body: 'Simón está en la puerta: "$transcript"',
+      unit: unit,
+      visitorName: 'Simón',
+      transcript: transcript,
+      callId: callId,
+    );
   }
 
   Future<void> respondDoorbell(bool approve) async {
     final bell = pendingDoorbell;
     if (bell == null) return;
     pendingDoorbell = null;
+    await AndroidNotificationService.cancelDoorbellNotification();
+
+    // Enviar respuesta de vuelta a la Web para que LucIA hable en el videoportero
+    unawaited(
+      _remoteDoorbell.sendResponse(
+        channel: doorbellChannel,
+        callId: bell.id,
+        action: approve ? 'approve' : 'reject',
+        unit: bell.unit,
+        residentName: currentUser?.fullName ?? bell.residentName,
+      ),
+    );
+
     if (approve) {
-      await openDoorDirect('Timbre E12W Aprobado');
+      await openDoorDirect('Timbre LucIA / E12W Aprobado');
     } else {
       _addLog(
         buildingId: activeBuildingId,
         unit: bell.unit,
         actorName: bell.visitorName,
         type: AccessEventType.aiVoice,
-        methodUsed: 'Timbre E12W',
+        methodUsed: 'Timbre LucIA / E12W',
         granted: false,
         notes: 'Visita de ${bell.visitorName} rechazada por el residente.',
       );
@@ -967,12 +1103,25 @@ class ZaguanStore extends ChangeNotifier {
   }
 
   void sendDoorbellVoiceReply(String text) {
+    final bell = pendingDoorbell;
+    if (bell != null) {
+      unawaited(
+        _remoteDoorbell.sendResponse(
+          channel: doorbellChannel,
+          callId: bell.id,
+          action: 'talk',
+          unit: bell.unit,
+          residentName: currentUser?.fullName ?? bell.residentName,
+          message: text,
+        ),
+      );
+    }
     _addLog(
       buildingId: activeBuildingId,
       unit: currentUser?.unit,
       actorName: currentUser?.fullName ?? 'Residente',
       type: AccessEventType.aiVoice,
-      methodUsed: 'SIP Altavoz E12W',
+      methodUsed: 'SIP Altavoz E12W / LucIA',
       notes: 'Habló al frente de calle: "$text"',
     );
     notifyListeners();
@@ -1034,6 +1183,7 @@ class ZaguanStore extends ChangeNotifier {
   @override
   void dispose() {
     _expiryTimer?.cancel();
+    _remoteDoorbell.stop();
     super.dispose();
   }
 }

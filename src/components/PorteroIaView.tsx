@@ -1,7 +1,18 @@
-import { ChangeEvent, FormEvent, useEffect, useState } from 'react';
+import { ChangeEvent, FormEvent, useEffect, useRef, useState } from 'react';
 import { ASSETS, BUILDING_INFO } from '../data/zaguanData';
 import { buildAkuvoxRtspUrl } from '../services/akuvoxService';
+import {
+  getLuciaActiveVoiceLabel,
+  speakAsLucia,
+  stopLuciaSpeech,
+} from '../services/luciaVoiceService';
 import { ParcelValidationDecision } from '../services/parcelVisionService';
+import {
+  getSavedDoorbellChannel,
+  saveDoorbellChannel,
+  sendRemoteDoorbellRing,
+  subscribeToRemoteDoorbellResponses,
+} from '../services/remoteDoorbellBridge';
 import {
   AkuvoxConfig,
   AkuvoxLogEntry,
@@ -130,11 +141,19 @@ export function PorteroIaView({
   onNavigate,
 }: PorteroIaViewProps) {
   const [mode, setMode] = useState<IntercomMode>('reposo');
-  const [voiceAudioEnabled, setVoiceAudioEnabled] = useState(false);
+  const [voiceAudioEnabled, setVoiceAudioEnabled] = useState(true);
+  const [luciaVoiceLabel, setLuciaVoiceLabel] = useState(() => getLuciaActiveVoiceLabel());
+  const [isListeningMic, setIsListeningMic] = useState(false);
+  const [doorbellChannel, setDoorbellChannel] = useState(() => getSavedDoorbellChannel());
+  const [remoteConnected, setRemoteConnected] = useState(false);
+  const [remoteRingStatus, setRemoteRingStatus] = useState<string | null>(null);
+  const [quickCallUnit, setQuickCallUnit] = useState<'4B' | '3A'>('4B');
   const [spokenInput, setSpokenInput] = useState('');
   const [chatLog, setChatLog] = useState<ChatBubble[]>([]);
   const [elderlyStep, setElderlyStep] = useState<'menu' | 'qr' | 'doc' | 'done'>('menu');
   const [elderlyDoc, setElderlyDoc] = useState('');
+  const voiceEnabledRef = useRef(true);
+  voiceEnabledRef.current = voiceAudioEnabled;
 
   // Keypad / QR / RFID & Schedule simulator
   const [pinInput, setPinInput] = useState('');
@@ -204,17 +223,122 @@ export function PorteroIaView({
     new Date().toLocaleTimeString('es-UY', { hour: '2-digit', minute: '2-digit' });
 
   const speakText = (text: string) => {
-    if (!voiceAudioEnabled || typeof window === 'undefined' || !('speechSynthesis' in window)) {
+    if (!voiceEnabledRef.current) return;
+    void speakAsLucia(text, (info) => {
+      setLuciaVoiceLabel(info.label);
+    });
+  };
+
+  useEffect(() => {
+    const unsubscribe = subscribeToRemoteDoorbellResponses(
+      doorbellChannel,
+      (resp) => {
+        if (resp.action === 'approve') {
+          onRespondVisit(true);
+          const msg = `¡Excelente! ${resp.residentName} del ${resp.unit} te acaba de abrir la puerta desde su celular. Pasá tranquilo.`;
+          setChatLog((prev) => [
+            ...prev,
+            { id: `remote-${Date.now()}`, sender: 'ia', text: msg, time: nowTime() },
+          ]);
+          setRemoteRingStatus(`Celular aprobó ingreso (Apto ${resp.unit}) → Puerta abierta`);
+          speakText(msg);
+        } else if (resp.action === 'reject') {
+          onRespondVisit(false);
+          const msg = `Disculpá, ${resp.residentName} del ${resp.unit} indicó desde su celular que ahora no puede recibir visitas.`;
+          setChatLog((prev) => [
+            ...prev,
+            { id: `remote-${Date.now()}`, sender: 'ia', text: msg, time: nowTime() },
+          ]);
+          setRemoteRingStatus(`Celular rechazó el ingreso (Apto ${resp.unit})`);
+          speakText(msg);
+        } else if (resp.action === 'talk' && resp.message) {
+          const msg = `Mensaje en vivo de ${resp.residentName} (${resp.unit}): ${resp.message}`;
+          setChatLog((prev) => [
+            ...prev,
+            { id: `remote-talk-${Date.now()}`, sender: 'ia', text: msg, time: nowTime() },
+          ]);
+          setRemoteRingStatus(`Audio recibido desde el celular (${resp.unit})`);
+          speakText(msg);
+        }
+      },
+      (connected) => setRemoteConnected(connected)
+    );
+    return () => {
+      unsubscribe();
+      stopLuciaSpeech();
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [doorbellChannel]);
+
+  const dispatchRingToAndroidPhone = async (
+    visitorName: string,
+    residentName: string,
+    unit: string,
+    transcript: string
+  ) => {
+    setRemoteRingStatus(`Enviando timbre a celular (canal ${doorbellChannel} · Apto ${unit})...`);
+    const result = await sendRemoteDoorbellRing(doorbellChannel, {
+      id: `call-${Date.now()}`,
+      unit,
+      visitorName,
+      residentName,
+      transcript,
+      buildingName: BUILDING_INFO.name,
+      conciergeName: 'LucIA',
+      timestampIso: new Date().toISOString(),
+    });
+    if (result.ok) {
+      setRemoteRingStatus(`¡Notificación enviada al celular! (Canal ${doorbellChannel} · Apto ${unit})`);
+      onLogAkuvoxProtocol(
+        'outbound',
+        `PUSH /${result.topic}`,
+        `LucIA envió timbre real al celular Android (Apto ${unit} · ${visitorName})`,
+        'ok'
+      );
+    } else {
+      setRemoteRingStatus(`Error enviando al celular: ${result.error}`);
+    }
+  };
+
+  const startBrowserMicrophone = () => {
+    if (typeof window === 'undefined') return;
+    const SpeechRec =
+      (window as unknown as { SpeechRecognition?: new () => unknown; webkitSpeechRecognition?: new () => unknown })
+        .SpeechRecognition ||
+      (window as unknown as { webkitSpeechRecognition?: new () => unknown }).webkitSpeechRecognition;
+
+    if (!SpeechRec) {
+      setRemoteRingStatus('Tu navegador no soporta dictado por micrófono (usá Chrome o Edge).');
       return;
     }
+
     try {
-      window.speechSynthesis.cancel();
-      const utter = new SpeechSynthesisUtterance(text);
-      utter.lang = 'es-UY';
-      utter.rate = 1.02;
-      window.speechSynthesis.speak(utter);
+      stopLuciaSpeech();
+      const rec = new SpeechRec() as {
+        lang: string;
+        interimResults: boolean;
+        maxAlternatives: number;
+        onstart: (() => void) | null;
+        onend: (() => void) | null;
+        onerror: (() => void) | null;
+        onresult: ((e: { results: ArrayLike<ArrayLike<{ transcript: string }>> }) => void) | null;
+        start: () => void;
+      };
+      rec.lang = 'es-UY';
+      rec.interimResults = false;
+      rec.maxAlternatives = 1;
+      rec.onstart = () => setIsListeningMic(true);
+      rec.onend = () => setIsListeningMic(false);
+      rec.onerror = () => setIsListeningMic(false);
+      rec.onresult = (event) => {
+        const transcript = event.results?.[0]?.[0]?.transcript;
+        if (transcript) {
+          processNaturalUtterance(transcript);
+        }
+      };
+      rec.start();
     } catch {
-      // Ignore unsupported speech synthesis
+      setIsListeningMic(false);
     }
   };
 
@@ -234,12 +358,13 @@ export function PorteroIaView({
     if (hardwareModel === 'akuvox-e12w') {
       onLogAkuvoxProtocol(
         'sip',
-        `SIP INVITE sip:portero_ia@${akuvoxConfig.sipServerIp} (G.722 + AEC)`,
-        'Botón físico E12W presionado → Audio bidireccional conectado a Agente Voz IA',
+        `SIP INVITE sip:lucia@${akuvoxConfig.sipServerIp} (G.722 + AEC)`,
+        'Botón físico E12W presionado → Audio bidireccional conectado a LucIA (Voz Uruguaya)',
         akuvoxConfig.enabled ? 'ok' : 'simulated'
       );
     }
-    const greeting = 'Hola, bienvenido al edificio. ¿A qué departamento visitas o traes entrega?';
+    const greeting =
+      '¡Hola! Soy LucIA, la portera virtual del edificio. ¿A qué apartamento venís o traés alguna entrega?';
     setChatLog([
       {
         id: `msg-greet-${Date.now()}`,
@@ -342,22 +467,24 @@ export function PorteroIaView({
     const unit = unitMatch ? unitMatch[1].toUpperCase() : BUILDING_INFO.activeUnit;
 
     const soyMatch = text.match(/soy\s+([A-ZÁÉÍÓÚÑa-záéíóúñ]+)/i);
-    const visitorName = soyMatch ? soyMatch[1] : 'Lucas';
+    const visitorName = soyMatch ? soyMatch[1] : 'Simón';
 
     const verMatch = text.match(/(?:ver a|para|busco a)\s+([A-ZÁÉÍÓÚÑa-záéíóúñ]+)/i);
-    const residentName = verMatch ? verMatch[1] : 'Martín';
+    const defaultResident = unit === '3A' ? 'Carolina' : 'Martín';
+    const residentName = verMatch ? verMatch[1] : defaultResident;
 
-    const reply = `Perfecto ${visitorName}. No abro sin confirmación: le envié una notificación con tu foto en vivo a ${residentName} del ${unit} para que apruebe tu ingreso.`;
+    const reply = `¡Bárbaro ${visitorName}! Aguantá un segundito que ya le mando tu foto al celular de ${residentName} del ${unit} para que te autorice.`;
     pushBubble('ia', reply);
     if (hardwareModel === 'akuvox-e12w') {
       onLogAkuvoxProtocol(
         'rtsp',
         `GET http://${akuvoxConfig.deviceIp}:8080/picture.jpg`,
-        `Foto en vivo enviada por Push/WhatsApp a ${residentName} (${unit})`,
+        `Foto en vivo enviada por Push/App a ${residentName} (${unit})`,
         akuvoxConfig.enabled ? 'ok' : 'simulated'
       );
     }
     onRequestVisitApproval(visitorName, residentName, unit, text);
+    void dispatchRingToAndroidPhone(visitorName, residentName, unit, text);
   };
 
   const handleUtteranceSubmit = (e: FormEvent) => {
@@ -488,8 +615,8 @@ export function PorteroIaView({
             </div>
             <h1 className="font-headline text-headline-md text-on-surface">
               {hardwareModel === 'akuvox-e12w'
-                ? 'Portero con IA sobre Akuvox E12W (Hardware Integrado)'
-                : 'El Portero con IA y Flujo de Paquetería Inteligente'}
+                ? 'LucIA · Portera Virtual Uruguaya sobre Akuvox E12W'
+                : 'LucIA · Kiosco Táctil 10" y Paquetería Inteligente'}
             </h1>
           </div>
 
@@ -556,17 +683,24 @@ export function PorteroIaView({
 
             <button
               type="button"
-              onClick={() => setVoiceAudioEnabled((prev) => !prev)}
+              onClick={() => {
+                setVoiceAudioEnabled((prev) => {
+                  const next = !prev;
+                  if (!next) stopLuciaSpeech();
+                  return next;
+                });
+              }}
               className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded border font-label text-label-sm cursor-pointer transition-colors ${
                 voiceAudioEnabled
                   ? 'bg-secondary-container text-on-secondary-container border-secondary'
                   : 'bg-surface border-outline-variant text-on-surface-variant hover:text-on-surface'
               }`}
+              title={luciaVoiceLabel}
             >
               <span className="material-symbols-outlined text-title-md" aria-hidden="true">
                 {voiceAudioEnabled ? 'volume_up' : 'volume_off'}
               </span>
-              <span>{voiceAudioEnabled ? 'Voz: ON' : 'Voz: Mute'}</span>
+              <span>{voiceAudioEnabled ? 'Voz LucIA: ON' : 'Voz LucIA: Mute'}</span>
             </button>
           </div>
         </div>
@@ -673,7 +807,7 @@ export function PorteroIaView({
                         notifications_active
                       </span>
                       <span className="font-headline text-label-md text-white">
-                        BOTÓN ÚNICO · LLAMAR IA
+                        BOTÓN ÚNICO · LLAMAR A LUCÍA
                       </span>
                     </button>
                   </div>
@@ -840,22 +974,92 @@ export function PorteroIaView({
                   </div>
                 </div>
 
-                {/* Voice AI Interaction Drawer for E12W Single Button */}
+                {/* Voice AI Interaction Drawer for E12W Single Button (LucIA + Remote Phone Ring) */}
                 <div className="pt-3 border-t border-white/10 flex flex-col gap-2.5">
-                  <div className="flex items-center justify-between">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
                     <span className="font-label text-label-sm text-sky-300">
-                      CONVERSACIÓN POR VOZ SIP (ALTAVOZ + MICRÓFONO DEL AKUVOX E12W)
+                      LUCÍA · VOZ URUGUAYA SIP ({luciaVoiceLabel})
                     </span>
-                    {mode === 'ocr-paquete' && matchedPreAuth && ocrPhase === 'awaiting-label' && (
-                      <button
-                        type="button"
-                        onClick={handleRunOcrScan}
-                        className="px-2.5 py-1 rounded bg-emerald-600 text-white font-label text-label-sm cursor-pointer"
+                    <div className="flex items-center gap-1.5">
+                      <span
+                        className={`inline-flex items-center gap-1 px-2 py-0.5 rounded font-mono text-[10px] ${
+                          remoteConnected
+                            ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-400/30'
+                            : 'bg-amber-500/20 text-amber-200 border border-amber-400/30'
+                        }`}
                       >
-                        Validar etiqueta OCR ahora
-                      </button>
-                    )}
+                        <span
+                          className={`w-1.5 h-1.5 rounded-full ${
+                            remoteConnected ? 'bg-emerald-400' : 'bg-amber-400'
+                          }`}
+                        />
+                        Celular APK · Canal: {doorbellChannel}
+                      </span>
+                      {mode === 'ocr-paquete' && matchedPreAuth && ocrPhase === 'awaiting-label' && (
+                        <button
+                          type="button"
+                          onClick={handleRunOcrScan}
+                          className="px-2.5 py-1 rounded bg-emerald-600 text-white font-label text-label-sm cursor-pointer"
+                        >
+                          Validar etiqueta OCR ahora
+                        </button>
+                      )}
+                    </div>
                   </div>
+
+                  {/* Direct 1-Click Remote Phone Ring Bar (Web → Android APK Notification) */}
+                  <div className="p-2.5 rounded-lg bg-emerald-950/50 border border-emerald-400/30 flex flex-wrap items-center justify-between gap-2">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="font-label text-label-sm text-emerald-200">
+                        Llamar directo a tu celular:
+                      </span>
+                      <div className="inline-flex rounded bg-black/40 p-0.5 border border-white/15">
+                        {(['4B', '3A'] as const).map((u) => (
+                          <button
+                            key={u}
+                            type="button"
+                            onClick={() => setQuickCallUnit(u)}
+                            className={`px-2 py-0.5 rounded font-mono text-[11px] cursor-pointer ${
+                              quickCallUnit === u
+                                ? 'bg-emerald-600 text-white'
+                                : 'text-white/70 hover:text-white'
+                            }`}
+                          >
+                            Apto {u}
+                          </button>
+                        ))}
+                      </div>
+                      <input
+                        type="text"
+                        value={doorbellChannel}
+                        onChange={(e) => setDoorbellChannel(saveDoorbellChannel(e.target.value))}
+                        aria-label="Canal de timbre remoto"
+                        className="w-28 rounded bg-black/50 border border-white/20 px-2 py-0.5 font-mono text-[11px] text-sky-200"
+                        title="Código de canal que debe coincidir con tu APK Android"
+                      />
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const resident = quickCallUnit === '3A' ? 'Carolina' : 'Martín';
+                        processNaturalUtterance(
+                          `Hola LucIA, soy Simón, vengo a ver a ${resident} del ${quickCallUnit}`
+                        );
+                      }}
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded bg-emerald-600 hover:bg-emerald-500 text-white font-label text-label-sm cursor-pointer"
+                    >
+                      <span className="material-symbols-outlined text-base" aria-hidden="true">
+                        notifications_active
+                      </span>
+                      <span>Tocar Timbre al Celular ({quickCallUnit})</span>
+                    </button>
+                  </div>
+
+                  {remoteRingStatus && (
+                    <div className="px-2.5 py-1.5 rounded bg-sky-500/15 border border-sky-400/30 font-mono text-[11px] text-sky-200">
+                      {remoteRingStatus}
+                    </div>
+                  )}
 
                   {chatLog.length > 0 ? (
                     <div className="flex flex-col gap-2 max-h-[160px] overflow-y-auto pr-1">
@@ -869,7 +1073,7 @@ export function PorteroIaView({
                           }`}
                         >
                           <span className="font-label text-[11px] text-white/65 block">
-                            {msg.sender === 'ia' ? 'Voz IA (Altavoz E12W)' : 'Visitante (Mic E12W)'}
+                            {msg.sender === 'ia' ? 'LucIA (Voz Uruguaya · E12W)' : 'Visitante (Mic E12W)'}
                           </span>
                           {msg.text}
                         </div>
@@ -877,8 +1081,9 @@ export function PorteroIaView({
                     </div>
                   ) : (
                     <p className="font-body text-body-sm text-white/60">
-                      Presioná el <strong>botón único del Akuvox E12W</strong> para iniciar la
-                      atención natural por voz SIP (ideal también para personas mayores sin app).
+                      Presioná el <strong>botón único del Akuvox E12W</strong> o{' '}
+                      <strong>Tocar Timbre al Celular</strong> para hablar con <strong>LucIA</strong>{' '}
+                      y hacer sonar la notificación real en tu teléfono Android.
                     </p>
                   )}
 
@@ -916,7 +1121,7 @@ export function PorteroIaView({
                         startAiCall();
                         pushBubble(
                           'ia',
-                          'Modo asistencia por voz: no necesitás app. Acercá tu código QR a la cámara de arriba o decime tu número de documento despacio.'
+                          'Modo asistencia por voz: quedate tranquilo que no necesitás app. Acercá tu código QR a la cámara de arriba o decime tu número de documento despacio.'
                         );
                       }}
                       className="px-2.5 py-1 rounded bg-sky-500/20 hover:bg-sky-500/30 font-label text-label-sm text-sky-200 cursor-pointer"
@@ -926,11 +1131,26 @@ export function PorteroIaView({
                   </div>
 
                   <form onSubmit={handleUtteranceSubmit} className="flex gap-2">
+                    <button
+                      type="button"
+                      onClick={startBrowserMicrophone}
+                      title="Hablarle a LucIA con tu micrófono (es-UY)"
+                      className={`px-3 py-2 rounded font-label text-label-sm cursor-pointer shrink-0 inline-flex items-center gap-1 ${
+                        isListeningMic
+                          ? 'bg-red-600 text-white animate-pulse'
+                          : 'bg-white/10 hover:bg-white/20 text-white border border-white/20'
+                      }`}
+                    >
+                      <span className="material-symbols-outlined text-base" aria-hidden="true">
+                        {isListeningMic ? 'graphic_eq' : 'mic'}
+                      </span>
+                      <span>{isListeningMic ? 'Escuchando...' : 'Mic'}</span>
+                    </button>
                     <input
                       type="text"
                       value={spokenInput}
                       onChange={(e) => setSpokenInput(e.target.value)}
-                      placeholder="Hablá al micrófono del E12W..."
+                      placeholder="Hablale o escribile a LucIA..."
                       className="flex-1 rounded bg-[#0A0E12] border border-white/20 px-3 py-2 text-white placeholder:text-white/40 font-body text-body-sm focus:border-sky-400 focus:outline-none"
                     />
                     <button

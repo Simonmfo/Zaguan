@@ -630,11 +630,79 @@ app.post('/api/concierge/webhook/call-start', async (req, res) => {
   res.json({
     ok: true,
     sessionId: `sip-${Date.now()}`,
-    greeting: 'Hola, bienvenido al edificio. ¿A qué departamento visitás o traés entrega?',
+    conciergeName: 'LucIA',
+    greeting: '¡Hola! Soy LucIA, la portera virtual del edificio. ¿A qué apartamento venís o traés alguna entrega?',
     systemPromptLoaded: ZAGUAN_CONCIERGE_SYSTEM_PROMPT.length > 0,
     availableTools: ['buscarResidente', 'validarCodigoVoz', 'procesarPaquete'],
     snapshotDataUrl: snap.dataUrl,
   });
+});
+
+// 10.5 Voz neuronal uruguaya de LucIA (Gemini 2.5 Flash Preview TTS)
+app.post('/api/lucia-tts', async (req, res) => {
+  const text = String(req.body?.text || '').trim().slice(0, 500);
+  if (!text) {
+    res.status(400).json({ ok: false, error: 'Missing text' });
+    return;
+  }
+  const apiKey = process.env.GEMINI_API_KEY;
+  if (!apiKey) {
+    res.sendStatus(204);
+    return;
+  }
+  try {
+    const ai = new GoogleGenAI({ apiKey });
+    const response = await ai.models.generateContent({
+      model: 'gemini-2.5-flash-preview-tts',
+      contents: [
+        {
+          parts: [
+            {
+              text:
+                'Decí exactamente la siguiente frase como LucIA, una mujer uruguaya joven y amable de Montevideo, con acento rioplatense uruguayo bien natural, cálido y humano:\n\n' +
+                text,
+            },
+          ],
+        },
+      ],
+      config: {
+        responseModalities: ['AUDIO'],
+        speechConfig: {
+          voiceConfig: {
+            prebuiltVoiceConfig: { voiceName: 'Aoede' },
+          },
+        },
+      },
+    });
+    const parts = response.candidates?.[0]?.content?.parts || [];
+    for (const part of parts) {
+      if (part.inlineData?.data) {
+        const raw = Buffer.from(part.inlineData.data, 'base64');
+        const sampleRate = 24000;
+        const header = Buffer.alloc(44);
+        header.write('RIFF', 0);
+        header.writeUInt32LE(36 + raw.length, 4);
+        header.write('WAVE', 8);
+        header.write('fmt ', 12);
+        header.writeUInt32LE(16, 16);
+        header.writeUInt16LE(1, 20);
+        header.writeUInt16LE(1, 22);
+        header.writeUInt32LE(sampleRate, 24);
+        header.writeUInt32LE(sampleRate * 2, 28);
+        header.writeUInt16LE(2, 32);
+        header.writeUInt16LE(16, 34);
+        header.write('data', 36);
+        header.writeUInt32LE(raw.length, 40);
+        res.setHeader('Content-Type', 'audio/wav');
+        res.send(Buffer.concat([header, raw]));
+        return;
+      }
+    }
+    res.sendStatus(204);
+  } catch (err) {
+    console.error('[LucIA TTS local] Error:', err);
+    res.sendStatus(204);
+  }
 });
 
 app.post('/api/concierge/turn', async (req, res) => {
