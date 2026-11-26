@@ -316,6 +316,8 @@ class PendingDoorbellModel {
     required this.visitorName,
     required this.reasonTranscript,
     required this.timeLabel,
+    this.isPackage = false,
+    this.carrier,
   });
 
   final String id;
@@ -324,6 +326,8 @@ class PendingDoorbellModel {
   final String visitorName;
   final String reasonTranscript;
   final String timeLabel;
+  final bool isPackage;
+  final String? carrier;
 }
 
 class PendingPackageAlertModel {

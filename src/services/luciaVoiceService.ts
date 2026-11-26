@@ -1,10 +1,12 @@
 /**
- * LucIA — Motor de Voz Humana Uruguaya / Rioplatense
+ * LucIA — Motor de Voz Humana Uruguaya / Rioplatense (Ágil, Corta y Variada)
  *
- * 1. Intenta primero audio neuronal real vía `/api/lucia-tts` (Gemini 2.5 Flash TTS con acento uruguayo).
- * 2. Si no hay API key en el servidor o no responde a tiempo, selecciona automáticamente la voz
- *    femenina rioplatense más humana disponible en el dispositivo:
- *      es-UY Valentina (Uruguay) → es-AR Elena/Sofía (Rioplatense) → es-419 / Paulina / Google Español.
+ * 1. Intenta audio neuronal real vía `/api/lucia-tts` (Gemini 2.5 Flash TTS con acento uruguayo).
+ *    Si el servidor responde 204 (sin GEMINI_API_KEY), lo recuerda en memoria para no perder tiempo
+ *    en los siguientes turnos (latencia 0 ms).
+ * 2. Selecciona automáticamente la voz femenina uruguaya/rioplatense más natural disponible
+ *    (es-UY Valentina → es-AR Elena/Sofía → es-419 Paulina/Google Español) con velocidad ágil.
+ * 3. Provee bancos de frases uruguayas cortas sin repetir la misma dos veces seguidas.
  */
 
 export interface LuciaVoiceInfo {
@@ -16,6 +18,79 @@ export interface LuciaVoiceInfo {
 let currentAudio: HTMLAudioElement | null = null;
 let cachedVoices: SpeechSynthesisVoice[] = [];
 let activeVoiceLabel = 'LucIA · Uruguaya (es-UY / Rioplatense)';
+let neuralApiAvailable: boolean | null = null;
+const lastPhraseIdx: Record<string, number> = {};
+
+function pickNoRepeat(key: string, options: string[]): string {
+  if (options.length === 0) return '';
+  if (options.length === 1) return options[0];
+  const prev = lastPhraseIdx[key] ?? -1;
+  let next = Math.floor(Math.random() * options.length);
+  if (next === prev) {
+    next = (prev + 1) % options.length;
+  }
+  lastPhraseIdx[key] = next;
+  return options[next];
+}
+
+export function getLuciaGreeting(): string {
+  return pickNoRepeat('greeting', [
+    '¡Hola! Soy LucIA. ¿A qué apartamento venís o traés algún paquete?',
+    '¡Buenas! Hablás con LucIA. Decime a qué apto venís o si es una entrega.',
+    '¡Hola, qué tal! Soy LucIA, ¿con quién venís o a qué apartamento?',
+    '¡Buenas! Soy LucIA del edificio. ¿A qué apto venís?',
+  ]);
+}
+
+export function getLuciaVisitCallReply(
+  visitorName: string,
+  residentName: string,
+  unit: string
+): string {
+  return pickNoRepeat('visit', [
+    `Dale ${visitorName}, dame un minuto que llamo al ${unit} para que te atiendan.`,
+    `Bárbaro ${visitorName}, aguantá un toque que ya le aviso a ${residentName} del ${unit}.`,
+    `Perfecto ${visitorName}, dame un segundito que ya le toco al celular del ${unit}.`,
+    `Genial ${visitorName}, ahí le mando aviso a ${residentName} del ${unit}, esperá un toque.`,
+  ]);
+}
+
+export function getLuciaPackageCallReply(carrier: string, unit: string): string {
+  return pickNoRepeat('package', [
+    `Bárbaro, dame un minuto que ya le aviso al celular del ${unit} por el paquete de ${carrier}.`,
+    `Dale, aguantá un toque que ahí le notifico al ${unit} para ver si reciben ${carrier}.`,
+    `Perfecto, ya le mandé aviso al ${unit} por la entrega de ${carrier}, esperá un segundito.`,
+    `Genial, ahí llamo al celular del ${unit} para que confirmen el paquete de ${carrier}.`,
+  ]);
+}
+
+export function getLuciaApprovedReply(unit: string, isPackage: boolean): string {
+  if (isPackage) {
+    return pickNoRepeat('pkg-approved', [
+      `¡Listo! Del ${unit} aceptaron el paquete, ya te abrí el hall, pasá nomás.`,
+      `¡Bárbaro! Te habilitaron el zaguán para dejar la entrega, pasá tranquilo.`,
+      `¡Impecable! Confirmaron el paquete en el ${unit}, ya podés dejarlo adentro.`,
+    ]);
+  }
+  return pickNoRepeat('visit-approved', [
+    `¡Listo! Ya te abrieron del ${unit}, pasá tranquilo.`,
+    `¡Impecable! Te acaban de abrir desde el celular, pasá nomás.`,
+    `¡Bárbaro! Puerta abierta, podés pasar.`,
+  ]);
+}
+
+export function getLuciaRejectedReply(unit: string, isPackage: boolean): string {
+  if (isPackage) {
+    return pickNoRepeat('pkg-rejected', [
+      `Disculpá, del ${unit} avisaron que no pueden recibir el paquete ahora.`,
+      `Che, disculpá, en el ${unit} indicaron que no reciben esa entrega.`,
+    ]);
+  }
+  return pickNoRepeat('visit-rejected', [
+    `Disculpá, del ${unit} avisaron que ahora no pueden atender.`,
+    `Che, disculpá, desde el ${unit} indicaron que ahora no reciben visitas.`,
+  ]);
+}
 
 function refreshVoices(): SpeechSynthesisVoice[] {
   if (typeof window === 'undefined' || !('speechSynthesis' in window)) return [];
@@ -38,7 +113,6 @@ function scoreRioplatenseFemaleVoice(v: SpeechSynthesisVoice): number {
   const lang = v.lang.toLowerCase();
   let score = 0;
 
-  // Descartar voces claramente masculinas
   const maleHints = [
     'mateo',
     'tomas',
@@ -59,19 +133,17 @@ function scoreRioplatenseFemaleVoice(v: SpeechSynthesisVoice): number {
     'enrique',
   ];
   if (maleHints.some((h) => name.includes(h))) {
-    score -= 100;
+    score -= 120;
   }
 
-  // Prioridad máxima: Uruguay (es-UY) y Rioplatense (es-AR)
-  if (lang === 'es-uy' || lang.startsWith('es-uy')) score += 120;
-  else if (lang === 'es-ar' || lang.startsWith('es-ar')) score += 105;
+  if (lang === 'es-uy' || lang.startsWith('es-uy')) score += 140;
+  else if (lang === 'es-ar' || lang.startsWith('es-ar')) score += 120;
   else if (lang === 'es-419' || lang === 'es-us') score += 75;
   else if (lang.startsWith('es-')) score += 50;
   else return -999;
 
-  // Voces femeninas naturales conocidas (Edge Neural, Chrome Google, macOS Enhanced/Premium)
-  if (name.includes('valentina')) score += 90; // Microsoft Valentina Online (Natural) - Uruguay
-  if (name.includes('elena')) score += 85; // Microsoft Elena Online (Natural) - Argentina
+  if (name.includes('valentina')) score += 95;
+  if (name.includes('elena')) score += 90;
   if (name.includes('natural') || name.includes('neural') || name.includes('online')) score += 55;
   if (name.includes('premium') || name.includes('enhanced')) score += 45;
   if (name.includes('google español') || name.includes('google spanish')) score += 40;
@@ -145,10 +217,6 @@ export function getLuciaActiveVoiceLabel(): string {
   return activeVoiceLabel;
 }
 
-/**
- * Normaliza abreviaturas para que LucIA pronuncie de forma 100% natural en español uruguayo
- * (ej. "LucIA" -> "Lucía", "4B" -> "4 B", "Apto" -> "apartamento").
- */
 function prepareSpokenUruguayanText(raw: string): string {
   return raw
     .replace(/\bLucIA\b/g, 'Lucía')
@@ -170,43 +238,49 @@ export async function speakAsLucia(
 
   stopLuciaSpeech();
 
-  // 1. Intentar TTS Neuronal humano (Gemini 2.5 Flash TTS con acento uruguayo)
-  try {
-    const controller = new AbortController();
-    const timer = window.setTimeout(() => controller.abort(), 4500);
-    const res = await fetch('/api/lucia-tts', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ text: spokenText }),
-      signal: controller.signal,
-    });
-    window.clearTimeout(timer);
+  // 1. Intentar TTS Neuronal humano (Gemini 2.5 Flash TTS) si no dio 204 antes
+  if (neuralApiAvailable !== false) {
+    try {
+      const controller = new AbortController();
+      const timer = window.setTimeout(() => controller.abort(), 3200);
+      const res = await fetch('/api/lucia-tts', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text: spokenText }),
+        signal: controller.signal,
+      });
+      window.clearTimeout(timer);
 
-    if (res.status === 200) {
-      const blob = await res.blob();
-      if (blob.size > 512) {
-        const url = URL.createObjectURL(blob);
-        const audio = new Audio(url);
-        currentAudio = audio;
-        activeVoiceLabel = 'LucIA · Voz Neuronal Uruguaya (Gemini)';
-        onEngineResolved?.({
-          label: activeVoiceLabel,
-          lang: 'es-UY',
-          isNeuralApi: true,
-        });
-        audio.onended = () => {
-          URL.revokeObjectURL(url);
-          if (currentAudio === audio) currentAudio = null;
-        };
-        await audio.play();
-        return;
+      if (res.status === 204) {
+        neuralApiAvailable = false;
+      } else if (res.status === 200) {
+        const blob = await res.blob();
+        if (blob.size > 512) {
+          neuralApiAvailable = true;
+          const url = URL.createObjectURL(blob);
+          const audio = new Audio(url);
+          audio.playbackRate = 1.12; // Ritmo uruguayo ágil y natural
+          currentAudio = audio;
+          activeVoiceLabel = 'LucIA · Voz Neuronal Uruguaya (Gemini)';
+          onEngineResolved?.({
+            label: activeVoiceLabel,
+            lang: 'es-UY',
+            isNeuralApi: true,
+          });
+          audio.onended = () => {
+            URL.revokeObjectURL(url);
+            if (currentAudio === audio) currentAudio = null;
+          };
+          await audio.play();
+          return;
+        }
       }
+    } catch {
+      // Fallback inmediato a voz natural rioplatense del navegador
     }
-  } catch {
-    // Fallback silencioso a voz natural rioplatense del navegador
   }
 
-  // 2. Fallback a la mejor voz femenina rioplatense/uruguaya disponible en el navegador
+  // 2. Fallback instantáneo (0 ms) a la mejor voz femenina uruguaya/rioplatense del navegador
   if (!('speechSynthesis' in window)) return;
   try {
     const bestVoice = pickBestLuciaBrowserVoice();
@@ -228,9 +302,9 @@ export async function speakAsLucia(
         isNeuralApi: false,
       });
     }
-    // Cadencia cálida y conversacional (menos acelerada y menos metálica)
-    utter.rate = 0.96;
-    utter.pitch = 1.05;
+    // Más ágil y natural (nada lento)
+    utter.rate = 1.18;
+    utter.pitch = 1.04;
     utter.volume = 1;
     window.speechSynthesis.speak(utter);
   } catch {

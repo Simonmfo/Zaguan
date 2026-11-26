@@ -463,11 +463,20 @@ class ZaguanStore extends ChangeNotifier {
       visitorName: event.visitorName,
       reasonTranscript: event.transcript,
       timeLabel: _nowHm(),
+      isPackage: event.isPackage,
+      carrier: event.carrier,
     );
 
+    final notifTitle = event.isPackage
+        ? '📦 Paquete ${event.carrier ?? 'Entrega'} · Apto ${event.unit}'
+        : '🔔 Timbre LucIA · Apto ${event.unit}';
+    final notifBody = event.isPackage
+        ? 'Llegó ${event.carrier ?? 'un paquete'} para el ${event.unit}. Tocá para recibir en el hall o rechazar.'
+        : '${event.visitorName} está en la puerta: "${event.transcript}"';
+
     AndroidNotificationService.showDoorbellNotification(
-      title: '🔔 Timbre LucIA · Apto ${event.unit}',
-      body: '${event.visitorName} está en la puerta: "${event.transcript}"',
+      title: notifTitle,
+      body: notifBody,
       unit: event.unit,
       visitorName: event.visitorName,
       transcript: event.transcript,
@@ -478,9 +487,11 @@ class ZaguanStore extends ChangeNotifier {
       buildingId: activeBuildingId,
       unit: event.unit,
       actorName: event.visitorName,
-      type: AccessEventType.aiVoice,
-      methodUsed: 'LucIA Web → Push Android',
-      notes: 'Timbre recibido desde videoportero Web: "${event.transcript}"',
+      type: event.isPackage ? AccessEventType.packageOcr : AccessEventType.aiVoice,
+      methodUsed: event.isPackage ? 'LucIA Paquete → Push Android' : 'LucIA Web → Push Android',
+      notes: event.isPackage
+          ? 'Notificación obligatoria de paquete (${event.carrier ?? 'Entrega'}) enviada al celular.'
+          : 'Timbre recibido desde videoportero Web: "${event.transcript}"',
     );
     notifyListeners();
   }
@@ -1075,28 +1086,55 @@ class ZaguanStore extends ChangeNotifier {
     pendingDoorbell = null;
     await AndroidNotificationService.cancelDoorbellNotification();
 
+    final action = bell.isPackage
+        ? (approve ? 'approve_package' : 'reject_package')
+        : (approve ? 'approve' : 'reject');
+
     // Enviar respuesta de vuelta a la Web para que LucIA hable en el videoportero
     unawaited(
       _remoteDoorbell.sendResponse(
         channel: doorbellChannel,
         callId: bell.id,
-        action: approve ? 'approve' : 'reject',
+        action: action,
         unit: bell.unit,
         residentName: currentUser?.fullName ?? bell.residentName,
       ),
     );
 
     if (approve) {
-      await openDoorDirect('Timbre LucIA / E12W Aprobado');
+      if (bell.isPackage) {
+        await openDoorDirect('Paquete Recibido (Relé 1 Zaguán)', relayId: 1);
+        final carrier = bell.carrier ?? 'Paquetería';
+        deliveredPackages.insert(
+          0,
+          DeliveredPackageModel(
+            id: 'del-${DateTime.now().millisecondsSinceEpoch}',
+            buildingId: activeBuildingId,
+            unit: bell.unit,
+            code: '#PK-${100 + _rng.nextInt(899)}',
+            carrier: carrier,
+            location: activeBuilding.storageMode == 'locker'
+                ? 'Locker Inteligente #B2'
+                : 'Zaguán Paquetería (Exclusa 1)',
+            validationMethod: 'Confirmado desde notificación Android (LucIA)',
+            receivedTime: 'Hoy ${_nowHm()} hs',
+            note: 'Residente aceptó recibir paquete desde su celular. Foto comprobante guardada.',
+          ),
+        );
+      } else {
+        await openDoorDirect('Timbre LucIA / E12W Aprobado');
+      }
     } else {
       _addLog(
         buildingId: activeBuildingId,
         unit: bell.unit,
         actorName: bell.visitorName,
-        type: AccessEventType.aiVoice,
-        methodUsed: 'Timbre LucIA / E12W',
+        type: bell.isPackage ? AccessEventType.packageOcr : AccessEventType.aiVoice,
+        methodUsed: bell.isPackage ? 'Paquete Rechazado (LucIA)' : 'Timbre LucIA / E12W',
         granted: false,
-        notes: 'Visita de ${bell.visitorName} rechazada por el residente.',
+        notes: bell.isPackage
+            ? 'Paquete de ${bell.carrier ?? bell.visitorName} rechazado desde el celular.'
+            : 'Visita de ${bell.visitorName} rechazada por el residente.',
       );
     }
     notifyListeners();

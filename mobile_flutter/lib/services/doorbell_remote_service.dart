@@ -10,6 +10,8 @@ class RemoteDoorbellEvent {
     required this.residentName,
     required this.transcript,
     required this.buildingName,
+    this.isPackage = false,
+    this.carrier,
   });
 
   final String id;
@@ -18,6 +20,8 @@ class RemoteDoorbellEvent {
   final String residentName;
   final String transcript;
   final String buildingName;
+  final bool isPackage;
+  final String? carrier;
 }
 
 /// Cliente 100% Dart (`dart:io` HttpClient) que escucha timbres en tiempo real
@@ -119,14 +123,17 @@ class DoorbellRemoteService {
       if (callId.isNotEmpty && _seenIds.contains(callId)) return;
       if (callId.isNotEmpty) _seenIds.add(callId);
 
+      final isPkg = payload['kind']?.toString() == 'package';
       _onRing?.call(
         RemoteDoorbellEvent(
           id: callId.isEmpty ? 'call-${DateTime.now().millisecondsSinceEpoch}' : callId,
           unit: (payload['unit']?.toString() ?? '4B').toUpperCase(),
-          visitorName: payload['visitorName']?.toString() ?? 'Visita',
+          visitorName: payload['visitorName']?.toString() ?? (isPkg ? 'Repartidor' : 'Visita'),
           residentName: payload['residentName']?.toString() ?? 'Residente',
           transcript: payload['transcript']?.toString() ?? 'Visita en la entrada del edificio.',
           buildingName: payload['buildingName']?.toString() ?? 'Edificio Pocitos 2468',
+          isPackage: isPkg,
+          carrier: payload['carrier']?.toString(),
         ),
       );
     } catch (_) {

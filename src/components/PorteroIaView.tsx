@@ -3,6 +3,11 @@ import { ASSETS, BUILDING_INFO } from '../data/zaguanData';
 import { buildAkuvoxRtspUrl } from '../services/akuvoxService';
 import {
   getLuciaActiveVoiceLabel,
+  getLuciaApprovedReply,
+  getLuciaGreeting,
+  getLuciaPackageCallReply,
+  getLuciaRejectedReply,
+  getLuciaVisitCallReply,
   speakAsLucia,
   stopLuciaSpeech,
 } from '../services/luciaVoiceService';
@@ -154,6 +159,10 @@ export function PorteroIaView({
   const [elderlyDoc, setElderlyDoc] = useState('');
   const voiceEnabledRef = useRef(true);
   voiceEnabledRef.current = voiceAudioEnabled;
+  const activeRecognitionRef = useRef<{ stop: () => void; abort: () => void } | null>(null);
+  const silenceTimerRef = useRef<number | null>(null);
+  const liveTranscriptRef = useRef('');
+  const micCommittedRef = useRef(false);
 
   // Keypad / QR / RFID & Schedule simulator
   const [pinInput, setPinInput] = useState('');
@@ -233,26 +242,44 @@ export function PorteroIaView({
     const unsubscribe = subscribeToRemoteDoorbellResponses(
       doorbellChannel,
       (resp) => {
-        if (resp.action === 'approve') {
-          onRespondVisit(true);
-          const msg = `¡Excelente! ${resp.residentName} del ${resp.unit} te acaba de abrir la puerta desde su celular. Pasá tranquilo.`;
+        if (resp.action === 'approve' || resp.action === 'approve_package') {
+          const isPkg = resp.action === 'approve_package';
+          if (isPkg) {
+            onRespondSpontaneousParcel('authorize');
+          } else {
+            onRespondVisit(true);
+          }
+          const msg = getLuciaApprovedReply(resp.unit, isPkg);
           setChatLog((prev) => [
             ...prev,
             { id: `remote-${Date.now()}`, sender: 'ia', text: msg, time: nowTime() },
           ]);
-          setRemoteRingStatus(`Celular aprobó ingreso (Apto ${resp.unit}) → Puerta abierta`);
+          setRemoteRingStatus(
+            isPkg
+              ? `Celular aceptó paquete (Apto ${resp.unit}) → Hall/Zaguán abierto`
+              : `Celular aprobó ingreso (Apto ${resp.unit}) → Puerta abierta`
+          );
           speakText(msg);
-        } else if (resp.action === 'reject') {
-          onRespondVisit(false);
-          const msg = `Disculpá, ${resp.residentName} del ${resp.unit} indicó desde su celular que ahora no puede recibir visitas.`;
+        } else if (resp.action === 'reject' || resp.action === 'reject_package') {
+          const isPkg = resp.action === 'reject_package';
+          if (isPkg) {
+            onRespondSpontaneousParcel('reject');
+          } else {
+            onRespondVisit(false);
+          }
+          const msg = getLuciaRejectedReply(resp.unit, isPkg);
           setChatLog((prev) => [
             ...prev,
             { id: `remote-${Date.now()}`, sender: 'ia', text: msg, time: nowTime() },
           ]);
-          setRemoteRingStatus(`Celular rechazó el ingreso (Apto ${resp.unit})`);
+          setRemoteRingStatus(
+            isPkg
+              ? `Celular rechazó el paquete (Apto ${resp.unit})`
+              : `Celular rechazó el ingreso (Apto ${resp.unit})`
+          );
           speakText(msg);
         } else if (resp.action === 'talk' && resp.message) {
-          const msg = `Mensaje en vivo de ${resp.residentName} (${resp.unit}): ${resp.message}`;
+          const msg = `Del ${resp.unit} te dicen: ${resp.message}`;
           setChatLog((prev) => [
             ...prev,
             { id: `remote-talk-${Date.now()}`, sender: 'ia', text: msg, time: nowTime() },
@@ -270,29 +297,40 @@ export function PorteroIaView({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [doorbellChannel]);
 
-  const dispatchRingToAndroidPhone = async (
-    visitorName: string,
-    residentName: string,
-    unit: string,
-    transcript: string
-  ) => {
-    setRemoteRingStatus(`Enviando timbre a celular (canal ${doorbellChannel} · Apto ${unit})...`);
+  const dispatchRingToAndroidPhone = async (params: {
+    kind: 'visit' | 'package';
+    visitorName: string;
+    residentName: string;
+    unit: string;
+    carrier?: string;
+    transcript: string;
+  }) => {
+    const label = params.kind === 'package' ? `paquete (${params.carrier || 'Entrega'})` : 'timbre';
+    setRemoteRingStatus(`Enviando aviso de ${label} al celular (canal ${doorbellChannel} · Apto ${params.unit})...`);
     const result = await sendRemoteDoorbellRing(doorbellChannel, {
       id: `call-${Date.now()}`,
-      unit,
-      visitorName,
-      residentName,
-      transcript,
+      kind: params.kind,
+      unit: params.unit,
+      visitorName: params.visitorName,
+      residentName: params.residentName,
+      carrier: params.carrier,
+      transcript: params.transcript,
       buildingName: BUILDING_INFO.name,
       conciergeName: 'LucIA',
       timestampIso: new Date().toISOString(),
     });
     if (result.ok) {
-      setRemoteRingStatus(`¡Notificación enviada al celular! (Canal ${doorbellChannel} · Apto ${unit})`);
+      setRemoteRingStatus(
+        params.kind === 'package'
+          ? `📦 ¡Notificación de paquete enviada al celular! (Apto ${params.unit})`
+          : `🔔 ¡Notificación enviada al celular! (Canal ${doorbellChannel} · Apto ${params.unit})`
+      );
       onLogAkuvoxProtocol(
         'outbound',
         `PUSH /${result.topic}`,
-        `LucIA envió timbre real al celular Android (Apto ${unit} · ${visitorName})`,
+        params.kind === 'package'
+          ? `LucIA notificó paquete (${params.carrier}) al celular Android (Apto ${params.unit})`
+          : `LucIA envió timbre real al celular Android (Apto ${params.unit} · ${params.visitorName})`,
         'ok'
       );
     } else {
@@ -300,8 +338,37 @@ export function PorteroIaView({
     }
   };
 
+  const commitMicTranscript = () => {
+    if (silenceTimerRef.current !== null) {
+      window.clearTimeout(silenceTimerRef.current);
+      silenceTimerRef.current = null;
+    }
+    if (micCommittedRef.current) return;
+    const text = liveTranscriptRef.current.trim();
+    liveTranscriptRef.current = '';
+    try {
+      activeRecognitionRef.current?.stop();
+    } catch {
+      // Ignore
+    }
+    activeRecognitionRef.current = null;
+    setIsListeningMic(false);
+    if (text) {
+      micCommittedRef.current = true;
+      setSpokenInput('');
+      processNaturalUtterance(text);
+    }
+  };
+
   const startBrowserMicrophone = () => {
     if (typeof window === 'undefined') return;
+
+    // Si ya estaba escuchando, enviar de inmediato lo que captó sin esperar silencio
+    if (isListeningMic) {
+      commitMicTranscript();
+      return;
+    }
+
     const SpeechRec =
       (window as unknown as { SpeechRecognition?: new () => unknown; webkitSpeechRecognition?: new () => unknown })
         .SpeechRecognition ||
@@ -314,26 +381,68 @@ export function PorteroIaView({
 
     try {
       stopLuciaSpeech();
+      liveTranscriptRef.current = '';
+      micCommittedRef.current = false;
+
       const rec = new SpeechRec() as {
         lang: string;
         interimResults: boolean;
+        continuous: boolean;
         maxAlternatives: number;
         onstart: (() => void) | null;
         onend: (() => void) | null;
         onerror: (() => void) | null;
-        onresult: ((e: { results: ArrayLike<ArrayLike<{ transcript: string }>> }) => void) | null;
+        onresult: ((e: {
+          results: ArrayLike<{ isFinal?: boolean; 0: { transcript: string } }>;
+        }) => void) | null;
         start: () => void;
+        stop: () => void;
+        abort: () => void;
       };
       rec.lang = 'es-UY';
-      rec.interimResults = false;
+      rec.interimResults = true;
+      rec.continuous = true;
       rec.maxAlternatives = 1;
+      activeRecognitionRef.current = rec;
+
       rec.onstart = () => setIsListeningMic(true);
-      rec.onend = () => setIsListeningMic(false);
-      rec.onerror = () => setIsListeningMic(false);
+      rec.onend = () => {
+        if (!micCommittedRef.current && liveTranscriptRef.current.trim()) {
+          commitMicTranscript();
+        } else {
+          setIsListeningMic(false);
+        }
+      };
+      rec.onerror = () => {
+        if (silenceTimerRef.current !== null) {
+          window.clearTimeout(silenceTimerRef.current);
+          silenceTimerRef.current = null;
+        }
+        setIsListeningMic(false);
+      };
       rec.onresult = (event) => {
-        const transcript = event.results?.[0]?.[0]?.transcript;
-        if (transcript) {
-          processNaturalUtterance(transcript);
+        let combined = '';
+        let hasFinal = false;
+        for (let i = 0; i < event.results.length; i++) {
+          const item = event.results[i];
+          combined += item[0]?.transcript || '';
+          if (item.isFinal) hasFinal = true;
+        }
+        const clean = combined.trim();
+        if (!clean) return;
+        liveTranscriptRef.current = clean;
+        setSpokenInput(clean);
+
+        if (silenceTimerRef.current !== null) {
+          window.clearTimeout(silenceTimerRef.current);
+        }
+        // Cortar rápido (550 ms tras terminar de hablar o inmediato si isFinal) sin esperar 2 segundos
+        if (hasFinal) {
+          commitMicTranscript();
+        } else {
+          silenceTimerRef.current = window.setTimeout(() => {
+            commitMicTranscript();
+          }, 550);
         }
       };
       rec.start();
@@ -363,8 +472,7 @@ export function PorteroIaView({
         akuvoxConfig.enabled ? 'ok' : 'simulated'
       );
     }
-    const greeting =
-      '¡Hola! Soy LucIA, la portera virtual del edificio. ¿A qué apartamento venís o traés alguna entrega?';
+    const greeting = getLuciaGreeting();
     setChatLog([
       {
         id: `msg-greet-${Date.now()}`,
@@ -419,46 +527,55 @@ export function PorteroIaView({
 
     if (isParcel) {
       const unitMatch = text.match(/\b([1-9][a-dA-D]|[1-9]\d{2})\b/);
-      const unit = unitMatch ? unitMatch[1].toUpperCase() : BUILDING_INFO.activeUnit;
+      const rawUnit = unitMatch ? unitMatch[1].toUpperCase() : BUILDING_INFO.activeUnit;
+      const unit = rawUnit === '402' ? '4B' : rawUnit;
+      const residentName = unit === '3A' ? 'Carolina' : 'Martín';
 
       const foundPreAuth = preAuthParcels.find(
         (p) =>
           p.status === 'Esperando' &&
-          (p.unit.toUpperCase() === unit ||
-            (unit === '402' && p.unit === '4B') ||
-            lower.includes(p.carrier.toLowerCase()))
+          (p.unit.toUpperCase() === unit || lower.includes(p.carrier.toLowerCase()))
       );
 
-      if (foundPreAuth) {
-        const reply = `Tengo pre-autorizada una entrega de ${foundPreAuth.carrier} para el ${foundPreAuth.unit}. Acercá la etiqueta del paquete a la cámara superior del portero para lectura OCR.`;
-        pushBubble('ia', reply);
-        setMatchedPreAuth(foundPreAuth);
-        setOcrPhase('awaiting-label');
-        setMode('ocr-paquete');
-        return;
-      }
+      const carrier =
+        foundPreAuth?.carrier ||
+        (lower.includes('pedidos')
+          ? 'PedidosYa'
+          : lower.includes('mercado')
+            ? 'Mercado Libre'
+            : lower.includes('dac')
+              ? 'DAC'
+              : lower.includes('correo')
+                ? 'Correo Uruguayo'
+                : 'Paquetería');
 
-      const carrier = lower.includes('pedidos')
-        ? 'PedidosYa'
-        : lower.includes('mercado')
-          ? 'Mercado Libre'
-          : lower.includes('dac')
-            ? 'DAC Agencia Central'
-            : lower.includes('correo')
-              ? 'Correo Uruguayo'
-              : 'Envío / Mensajería';
-
-      const reply = `Detecté un paquete de ${carrier} para el ${unit} sin aviso previo. Enviando foto desde la cámara 1080p al residente (espera máx. 20 seg)...`;
+      // SIEMPRE notificar al celular del residente para confirmar si recibe el paquete o no
+      const reply = getLuciaPackageCallReply(carrier, unit);
       pushBubble('ia', reply);
+
       if (hardwareModel === 'akuvox-e12w') {
         onLogAkuvoxProtocol(
           'rtsp',
           `GET http://${akuvoxConfig.deviceIp}:8080/picture.jpg`,
-          `Snapshot 1080p capturado para alerta de paquete (${carrier})`,
+          `Snapshot 1080p enviado al celular por paquete (${carrier} · Apto ${unit})`,
           akuvoxConfig.enabled ? 'ok' : 'simulated'
         );
       }
-      onStartSpontaneousParcel(carrier, unit === '402' ? '4B' : unit, storageMode);
+
+      if (foundPreAuth) {
+        setMatchedPreAuth(foundPreAuth);
+        setOcrPhase('awaiting-label');
+        setMode('ocr-paquete');
+      }
+      onStartSpontaneousParcel(carrier, unit, storageMode);
+      void dispatchRingToAndroidPhone({
+        kind: 'package',
+        visitorName: `Repartidor ${carrier}`,
+        residentName,
+        unit,
+        carrier,
+        transcript: text,
+      });
       return;
     }
 
@@ -473,7 +590,7 @@ export function PorteroIaView({
     const defaultResident = unit === '3A' ? 'Carolina' : 'Martín';
     const residentName = verMatch ? verMatch[1] : defaultResident;
 
-    const reply = `¡Bárbaro ${visitorName}! Aguantá un segundito que ya le mando tu foto al celular de ${residentName} del ${unit} para que te autorice.`;
+    const reply = getLuciaVisitCallReply(visitorName, residentName, unit);
     pushBubble('ia', reply);
     if (hardwareModel === 'akuvox-e12w') {
       onLogAkuvoxProtocol(
@@ -484,7 +601,13 @@ export function PorteroIaView({
       );
     }
     onRequestVisitApproval(visitorName, residentName, unit, text);
-    void dispatchRingToAndroidPhone(visitorName, residentName, unit, text);
+    void dispatchRingToAndroidPhone({
+      kind: 'visit',
+      visitorName,
+      residentName,
+      unit,
+      transcript: text,
+    });
   };
 
   const handleUtteranceSubmit = (e: FormEvent) => {
@@ -567,7 +690,19 @@ export function PorteroIaView({
     const decision = await onValidateParcelVisionFrame(params);
     setLastVisionDecision(decision);
     setVisionScanning(false);
-    pushBubble('ia', decision.message);
+    const detectedUnit = decision.extraction.unitNumber || BUILDING_INFO.activeUnit;
+    const detectedCarrier = decision.extraction.carrier || 'Paquetería';
+    const detectedResident = decision.extraction.recipientName || (detectedUnit === '3A' ? 'Carolina' : 'Martín');
+    const shortReply = getLuciaPackageCallReply(detectedCarrier, detectedUnit);
+    pushBubble('ia', shortReply);
+    void dispatchRingToAndroidPhone({
+      kind: 'package',
+      visitorName: `Repartidor ${detectedCarrier}`,
+      residentName: detectedResident,
+      unit: detectedUnit,
+      carrier: detectedCarrier,
+      transcript: `Etiqueta detectada: ${detectedCarrier} para ${detectedResident} (${detectedUnit})`,
+    });
   };
 
   const handleLabelFileUpload = (e: ChangeEvent<HTMLInputElement>) => {
@@ -1038,21 +1173,37 @@ export function PorteroIaView({
                         title="Código de canal que debe coincidir con tu APK Android"
                       />
                     </div>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        const resident = quickCallUnit === '3A' ? 'Carolina' : 'Martín';
-                        processNaturalUtterance(
-                          `Hola LucIA, soy Simón, vengo a ver a ${resident} del ${quickCallUnit}`
-                        );
-                      }}
-                      className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded bg-emerald-600 hover:bg-emerald-500 text-white font-label text-label-sm cursor-pointer"
-                    >
-                      <span className="material-symbols-outlined text-base" aria-hidden="true">
-                        notifications_active
-                      </span>
-                      <span>Tocar Timbre al Celular ({quickCallUnit})</span>
-                    </button>
+                    <div className="flex flex-wrap items-center gap-1.5">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const resident = quickCallUnit === '3A' ? 'Carolina' : 'Martín';
+                          processNaturalUtterance(
+                            `Hola LucIA, soy Simón, vengo a ver a ${resident} del ${quickCallUnit}`
+                          );
+                        }}
+                        className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded bg-emerald-600 hover:bg-emerald-500 text-white font-label text-label-sm cursor-pointer"
+                      >
+                        <span className="material-symbols-outlined text-base" aria-hidden="true">
+                          notifications_active
+                        </span>
+                        <span>Timbre Visita ({quickCallUnit})</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          processNaturalUtterance(
+                            `Traigo un paquete de Mercado Libre para el ${quickCallUnit}`
+                          );
+                        }}
+                        className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded bg-amber-600 hover:bg-amber-500 text-white font-label text-label-sm cursor-pointer"
+                      >
+                        <span className="material-symbols-outlined text-base" aria-hidden="true">
+                          inventory_2
+                        </span>
+                        <span>Paquete al Celular ({quickCallUnit})</span>
+                      </button>
+                    </div>
                   </div>
 
                   {remoteRingStatus && (

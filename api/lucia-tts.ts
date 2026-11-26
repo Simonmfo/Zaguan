@@ -56,7 +56,7 @@ export async function POST(request: Request): Promise<Response> {
           parts: [
             {
               text:
-                'Decí exactamente la siguiente frase como LucIA, una mujer uruguaya joven y amable de Montevideo, con acento rioplatense uruguayo bien natural, cálido, humano y cercano (pronunciando suave la ll/y rioplatense y entonación montevideana real, sin sonar robótica):\n\n' +
+                'Decí exactamente esta frase como LucIA, una joven uruguaya de Montevideo hablando a ritmo ágil, rápido y cotidiano (sin pausas largas ni tono lento), con acento uruguayo rioplatense bien marcado y natural (pronunciando suave la ll/y y entonación montevideana real):\n\n' +
                 text,
             },
           ],

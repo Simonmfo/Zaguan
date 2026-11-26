@@ -1188,12 +1188,16 @@ class _ResidentShellState extends State<ResidentShell> {
                         Container(
                           padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
                           decoration: BoxDecoration(
-                            color: const Color(0xFFBA1A1A),
+                            color: bell.isPackage
+                                ? const Color(0xFFB45309)
+                                : const Color(0xFFBA1A1A),
                             borderRadius: BorderRadius.circular(999),
                           ),
-                          child: const Text(
-                            '● TIMBRE EN VIVO · LUCÍA / E12W',
-                            style: TextStyle(
+                          child: Text(
+                            bell.isPackage
+                                ? '📦 PAQUETE EN PUERTA · LUCÍA'
+                                : '● TIMBRE EN VIVO · LUCÍA / E12W',
+                            style: const TextStyle(
                               color: Colors.white,
                               fontWeight: FontWeight.w800,
                               fontSize: 11,
@@ -1310,10 +1314,16 @@ class _ResidentShellState extends State<ResidentShell> {
                             onPressed: () async {
                               setState(() => _showTalkInput = false);
                               await store.respondDoorbell(true);
-                              _snack('Puerta abierta para ${bell.visitorName}.');
+                              _snack(
+                                bell.isPackage
+                                    ? 'Paquete aceptado. Zaguán abierto para ${bell.carrier ?? 'entrega'}.'
+                                    : 'Puerta abierta para ${bell.visitorName}.',
+                              );
                             },
-                            icon: const Icon(Icons.lock_open, size: 18),
-                            label: const Text('Abrir Puerta'),
+                            icon: Icon(bell.isPackage ? Icons.inventory_2 : Icons.lock_open, size: 18),
+                            label: Text(
+                              bell.isPackage ? 'Recibir Paquete (Abrir Hall)' : 'Abrir Puerta',
+                            ),
                           ),
                         ),
                       ],
@@ -1338,10 +1348,13 @@ class _ResidentShellState extends State<ResidentShell> {
                             onPressed: () async {
                               setState(() => _showTalkInput = false);
                               await store.respondDoorbell(false);
-                              _snack('Visita rechazada.', error: true);
+                              _snack(
+                                bell.isPackage ? 'Paquete rechazado.' : 'Visita rechazada.',
+                                error: true,
+                              );
                             },
                             icon: const Icon(Icons.call_end, size: 18),
-                            label: const Text('Rechazar'),
+                            label: Text(bell.isPackage ? 'No recibir' : 'Rechazar'),
                           ),
                         ),
                       ],

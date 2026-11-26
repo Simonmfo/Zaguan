@@ -659,7 +659,7 @@ app.post('/api/lucia-tts', async (req, res) => {
           parts: [
             {
               text:
-                'Decí exactamente la siguiente frase como LucIA, una mujer uruguaya joven y amable de Montevideo, con acento rioplatense uruguayo bien natural, cálido y humano:\n\n' +
+                'Decí exactamente esta frase como LucIA, una joven uruguaya de Montevideo hablando a ritmo ágil, rápido y cotidiano (sin pausas largas), con acento uruguayo rioplatense bien natural:\n\n' +
                 text,
             },
           ],

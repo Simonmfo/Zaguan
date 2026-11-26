@@ -13,9 +13,11 @@ const NTFY_BASE = 'https://ntfy.sh';
 
 export interface RemoteDoorbellRingPayload {
   id: string;
+  kind: 'visit' | 'package';
   unit: string;
   visitorName: string;
   residentName: string;
+  carrier?: string;
   transcript: string;
   buildingName: string;
   conciergeName: string;
@@ -24,7 +26,7 @@ export interface RemoteDoorbellRingPayload {
 
 export interface RemoteDoorbellResponsePayload {
   callId: string;
-  action: 'approve' | 'reject' | 'talk';
+  action: 'approve' | 'reject' | 'approve_package' | 'reject_package' | 'talk';
   unit: string;
   residentName: string;
   message?: string;
@@ -78,14 +80,18 @@ export async function sendRemoteDoorbellRing(
   payload: RemoteDoorbellRingPayload
 ): Promise<{ ok: boolean; topic: string; error?: string }> {
   const topic = getRingTopic(channel);
+  const title =
+    payload.kind === 'package'
+      ? `Paquete ${payload.carrier || 'Entrega'} (LucIA) · Apto ${payload.unit}`
+      : `Timbre E12W (LucIA) · Apto ${payload.unit}`;
   try {
     const res = await fetch(`${NTFY_BASE}/${topic}`, {
       method: 'POST',
       headers: {
         'Content-Type': 'text/plain; charset=utf-8',
-        Title: `Timbre E12W (LucIA) · Apto ${payload.unit}`,
+        Title: title,
         Priority: 'high',
-        Tags: 'bell,door',
+        Tags: payload.kind === 'package' ? 'package,bell' : 'bell,door',
       },
       body: JSON.stringify(payload),
     });
