@@ -422,11 +422,9 @@ export function PorteroIaView({
       };
       rec.onresult = (event) => {
         let combined = '';
-        let hasFinal = false;
         for (let i = 0; i < event.results.length; i++) {
           const item = event.results[i];
           combined += item[0]?.transcript || '';
-          if (item.isFinal) hasFinal = true;
         }
         const clean = combined.trim();
         if (!clean) return;
@@ -436,14 +434,10 @@ export function PorteroIaView({
         if (silenceTimerRef.current !== null) {
           window.clearTimeout(silenceTimerRef.current);
         }
-        // Cortar rápido (550 ms tras terminar de hablar o inmediato si isFinal) sin esperar 2 segundos
-        if (hasFinal) {
+        // Esperar 2 segundos de silencio tras terminar de hablar antes de responder (para no interrumpir)
+        silenceTimerRef.current = window.setTimeout(() => {
           commitMicTranscript();
-        } else {
-          silenceTimerRef.current = window.setTimeout(() => {
-            commitMicTranscript();
-          }, 550);
-        }
+        }, 2000);
       };
       rec.start();
     } catch {
