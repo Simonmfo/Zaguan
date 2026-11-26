@@ -10,6 +10,7 @@ import {
   getLuciaVisitCallReply,
   speakAsLucia,
   stopLuciaSpeech,
+  unlockLuciaAudio,
 } from '../services/luciaVoiceService';
 import { ParcelValidationDecision } from '../services/parcelVisionService';
 import {
@@ -362,6 +363,7 @@ export function PorteroIaView({
 
   const startBrowserMicrophone = () => {
     if (typeof window === 'undefined') return;
+    unlockLuciaAudio();
 
     // Si ya estaba escuchando, enviar de inmediato lo que captó sin esperar silencio
     if (isListeningMic) {
@@ -456,6 +458,7 @@ export function PorteroIaView({
   };
 
   const startAiCall = () => {
+    unlockLuciaAudio();
     setMode('ia-voz');
     setMatchedPreAuth(null);
     if (hardwareModel === 'akuvox-e12w') {

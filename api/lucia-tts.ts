@@ -1,5 +1,7 @@
 import { GoogleGenAI } from '@google/genai';
 
+export const maxDuration = 30;
+
 function buildWavFromPcm16(pcm: Uint8Array, sampleRate = 24000, channels = 1): Uint8Array {
   const header = new Uint8Array(44);
   const view = new DataView(header.buffer);
@@ -32,7 +34,10 @@ function buildWavFromPcm16(pcm: Uint8Array, sampleRate = 24000, channels = 1): U
   return wav;
 }
 
-async function synthesizeWithGemini(apiKey: string, text: string): Promise<{ bytes: Uint8Array; mime: string } | null> {
+async function synthesizeWithGemini(
+  apiKey: string,
+  text: string
+): Promise<{ bytes: Uint8Array; mime: string } | null> {
   const ai = new GoogleGenAI({ apiKey });
   const response = await ai.models.generateContent({
     model: 'gemini-2.5-flash-preview-tts',
@@ -86,37 +91,47 @@ export async function POST(request: Request): Promise<Response> {
 
     const apiKey = process.env.GEMINI_API_KEY;
     if (!apiKey) {
-      // 501 indica explícitamente "sin GEMINI_API_KEY" (nunca confundir con error temporal)
       return new Response(JSON.stringify({ ok: false, reason: 'no_api_key' }), {
         status: 501,
         headers: { 'Content-Type': 'application/json' },
       });
     }
 
-    // Hasta 2 intentos para absorber errores transitorios sin caer en voz robótica
-    let audio = await synthesizeWithGemini(apiKey, text).catch(() => null);
-    if (!audio) {
-      audio = await synthesizeWithGemini(apiKey, text);
-    }
-
-    if (audio) {
-      return new Response(Buffer.from(audio.bytes), {
-        status: 200,
-        headers: {
-          'Content-Type': audio.mime,
-          'Cache-Control': 'private, max-age=3600',
-          'X-Lucia-Engine': 'gemini-2.5-flash-preview-tts',
-        },
+    try {
+      const audio = await synthesizeWithGemini(apiKey, text);
+      if (audio) {
+        return new Response(Buffer.from(audio.bytes), {
+          status: 200,
+          headers: {
+            'Content-Type': audio.mime,
+            'Cache-Control': 'private, max-age=3600',
+            'X-Lucia-Engine': 'gemini-2.5-flash-preview-tts',
+          },
+        });
+      }
+      return new Response(JSON.stringify({ ok: false, reason: 'empty_audio' }), {
+        status: 503,
+        headers: { 'Content-Type': 'application/json' },
       });
+    } catch (err) {
+      const errMsg = err instanceof Error ? err.message : String(err);
+      const isRateLimit = errMsg.includes('429') || errMsg.includes('RESOURCE_EXHAUSTED');
+      console.error('[LucIA TTS] Gemini error:', errMsg);
+      return new Response(
+        JSON.stringify({
+          ok: false,
+          reason: isRateLimit ? 'rate_limit_429' : 'gemini_error',
+          detail: errMsg.slice(0, 160),
+        }),
+        {
+          status: isRateLimit ? 429 : 503,
+          headers: { 'Content-Type': 'application/json' },
+        }
+      );
     }
-
-    return new Response(JSON.stringify({ ok: false, reason: 'empty_audio' }), {
-      status: 503,
-      headers: { 'Content-Type': 'application/json' },
-    });
   } catch (err) {
-    console.error('[LucIA TTS] Transient Gemini error:', err);
-    return new Response(JSON.stringify({ ok: false, reason: 'gemini_transient_error' }), {
+    console.error('[LucIA TTS] Unexpected error:', err);
+    return new Response(JSON.stringify({ ok: false, reason: 'server_error' }), {
       status: 503,
       headers: { 'Content-Type': 'application/json' },
     });
