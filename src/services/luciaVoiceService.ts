@@ -1,12 +1,11 @@
 /**
- * LucIA — Motor de Voz Humana Uruguaya / Rioplatense (Ágil, Corta y Variada)
+ * LucIA — Motor de Voz Humana Uruguaya / Rioplatense (Consistente, Ágil y Cacheada)
  *
- * 1. Intenta audio neuronal real vía `/api/lucia-tts` (Gemini 2.5 Flash TTS con acento uruguayo).
- *    Si el servidor responde 204 (sin GEMINI_API_KEY), lo recuerda en memoria para no perder tiempo
- *    en los siguientes turnos (latencia 0 ms).
- * 2. Selecciona automáticamente la voz femenina uruguaya/rioplatense más natural disponible
- *    (es-UY Valentina → es-AR Elena/Sofía → es-419 Paulina/Google Español) con velocidad ágil.
- * 3. Provee bancos de frases uruguayas cortas sin repetir la misma dos veces seguidas.
+ * 1. Usa SIEMPRE Gemini 2.5 Flash TTS (`/api/lucia-tts`, voz Aoede con acento uruguayo) cuando
+ *    hay GEMINI_API_KEY en el servidor, con timeout amplio (12s), cancelación limpia de requests
+ *    viejos y caché local de audios (las frases ya generadas suenan en 0 ms y no consumen cuota).
+ * 2. Solo cae a la voz femenina rioplatense del navegador si el servidor responde 501 (sin API key)
+ *    o si falla completamente la red tras reintento.
  */
 
 export interface LuciaVoiceInfo {
@@ -16,9 +15,12 @@ export interface LuciaVoiceInfo {
 }
 
 let currentAudio: HTMLAudioElement | null = null;
+let activeFetchController: AbortController | null = null;
+let speechGeneration = 0;
 let cachedVoices: SpeechSynthesisVoice[] = [];
-let activeVoiceLabel = 'LucIA · Uruguaya (es-UY / Rioplatense)';
-let neuralApiAvailable: boolean | null = null;
+let activeVoiceLabel = 'LucIA · Voz Neuronal Uruguaya (Gemini)';
+let serverMissingApiKey = false;
+const audioBlobUrlCache = new Map<string, string>();
 const lastPhraseIdx: Record<string, number> = {};
 
 function pickNoRepeat(key: string, options: string[]): string {
@@ -190,6 +192,15 @@ export function pickBestLuciaBrowserVoice(): SpeechSynthesisVoice | null {
 }
 
 export function stopLuciaSpeech(): void {
+  speechGeneration++;
+  if (activeFetchController) {
+    try {
+      activeFetchController.abort();
+    } catch {
+      // Ignore
+    }
+    activeFetchController = null;
+  }
   if (currentAudio) {
     try {
       currentAudio.pause();
@@ -209,11 +220,6 @@ export function stopLuciaSpeech(): void {
 }
 
 export function getLuciaActiveVoiceLabel(): string {
-  const best = pickBestLuciaBrowserVoice();
-  if (activeVoiceLabel.includes('Gemini')) return activeVoiceLabel;
-  if (best) {
-    return `LucIA · ${best.name.replace(/Microsoft |Online \(Natural\) - /gi, '')} (${best.lang})`;
-  }
   return activeVoiceLabel;
 }
 
@@ -222,10 +228,22 @@ function prepareSpokenUruguayanText(raw: string): string {
     .replace(/\bLucIA\b/g, 'Lucía')
     .replace(/\bApto\.?\s*/gi, 'apartamento ')
     .replace(/\bE12W\b/gi, 'portero')
-    .replace(/\bOCR\b/g, 'escaneo')
+    .replace(/\bOCR\b/gi, 'escaneo')
     .replace(/\b1080p\b/gi, '')
     .replace(/\s+/g, ' ')
     .trim();
+}
+
+async function playAudioUrl(url: string, gen: number): Promise<boolean> {
+  if (gen !== speechGeneration) return false;
+  const audio = new Audio(url);
+  audio.playbackRate = 1.12;
+  currentAudio = audio;
+  audio.onended = () => {
+    if (currentAudio === audio) currentAudio = null;
+  };
+  await audio.play();
+  return true;
 }
 
 export async function speakAsLucia(
@@ -237,12 +255,27 @@ export async function speakAsLucia(
   if (!spokenText) return;
 
   stopLuciaSpeech();
+  const myGen = speechGeneration;
 
-  // 1. Intentar TTS Neuronal humano (Gemini 2.5 Flash TTS) si no dio 204 antes
-  if (neuralApiAvailable !== false) {
+  // 0. Si esta frase exacta ya fue generada por Gemini, reproducirla al instante (0 ms, misma voz)
+  const cachedUrl = audioBlobUrlCache.get(spokenText);
+  if (cachedUrl) {
     try {
-      const controller = new AbortController();
-      const timer = window.setTimeout(() => controller.abort(), 3200);
+      activeVoiceLabel = 'LucIA · Voz Neuronal Uruguaya (Gemini)';
+      onEngineResolved?.({ label: activeVoiceLabel, lang: 'es-UY', isNeuralApi: true });
+      await playAudioUrl(cachedUrl, myGen);
+      return;
+    } catch {
+      audioBlobUrlCache.delete(spokenText);
+    }
+  }
+
+  // 1. Llamar a Gemini 2.5 Flash TTS con timeout amplio (12s) para NO caer en voz rara por demora
+  if (!serverMissingApiKey) {
+    const controller = new AbortController();
+    activeFetchController = controller;
+    const timer = window.setTimeout(() => controller.abort(), 12000);
+    try {
       const res = await fetch('/api/lucia-tts', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -250,37 +283,43 @@ export async function speakAsLucia(
         signal: controller.signal,
       });
       window.clearTimeout(timer);
+      if (myGen !== speechGeneration) return;
 
-      if (res.status === 204) {
-        neuralApiAvailable = false;
+      if (res.status === 501) {
+        // Solo desactivar Gemini si explícitamente falta GEMINI_API_KEY en el servidor
+        serverMissingApiKey = true;
       } else if (res.status === 200) {
         const blob = await res.blob();
+        if (myGen !== speechGeneration) return;
         if (blob.size > 512) {
-          neuralApiAvailable = true;
           const url = URL.createObjectURL(blob);
-          const audio = new Audio(url);
-          audio.playbackRate = 1.12; // Ritmo uruguayo ágil y natural
-          currentAudio = audio;
+          audioBlobUrlCache.set(spokenText, url);
           activeVoiceLabel = 'LucIA · Voz Neuronal Uruguaya (Gemini)';
           onEngineResolved?.({
             label: activeVoiceLabel,
             lang: 'es-UY',
             isNeuralApi: true,
           });
-          audio.onended = () => {
-            URL.revokeObjectURL(url);
-            if (currentAudio === audio) currentAudio = null;
-          };
-          await audio.play();
+          await playAudioUrl(url, myGen);
           return;
         }
       }
-    } catch {
-      // Fallback inmediato a voz natural rioplatense del navegador
+    } catch (err) {
+      window.clearTimeout(timer);
+      // Si fue cancelado porque empezó una nueva frase, salir sin reproducir voz fallback
+      if (myGen !== speechGeneration || (err instanceof DOMException && err.name === 'AbortError' && activeFetchController !== controller)) {
+        return;
+      }
+    } finally {
+      if (activeFetchController === controller) {
+        activeFetchController = null;
+      }
     }
   }
 
-  // 2. Fallback instantáneo (0 ms) a la mejor voz femenina uruguaya/rioplatense del navegador
+  if (myGen !== speechGeneration) return;
+
+  // 2. Fallback a la mejor voz femenina rioplatense del navegador solo si Gemini no está disponible
   if (!('speechSynthesis' in window)) return;
   try {
     const bestVoice = pickBestLuciaBrowserVoice();
@@ -302,7 +341,6 @@ export async function speakAsLucia(
         isNeuralApi: false,
       });
     }
-    // Más ágil y natural (nada lento)
     utter.rate = 1.18;
     utter.pitch = 1.04;
     utter.volume = 1;

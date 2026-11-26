@@ -32,6 +32,47 @@ function buildWavFromPcm16(pcm: Uint8Array, sampleRate = 24000, channels = 1): U
   return wav;
 }
 
+async function synthesizeWithGemini(apiKey: string, text: string): Promise<{ bytes: Uint8Array; mime: string } | null> {
+  const ai = new GoogleGenAI({ apiKey });
+  const response = await ai.models.generateContent({
+    model: 'gemini-2.5-flash-preview-tts',
+    contents: [
+      {
+        parts: [
+          {
+            text:
+              'Hablá como LucIA, joven mujer uruguaya de Montevideo, con acento uruguayo rioplatense natural, cálido y ritmo ágil cotidiano. Decí exactamente esta frase:\n' +
+              text,
+          },
+        ],
+      },
+    ],
+    config: {
+      responseModalities: ['AUDIO'],
+      speechConfig: {
+        voiceConfig: {
+          prebuiltVoiceConfig: {
+            voiceName: 'Aoede',
+          },
+        },
+      },
+    },
+  });
+
+  const parts = response.candidates?.[0]?.content?.parts || [];
+  for (const part of parts) {
+    const inline = part.inlineData;
+    if (inline?.data) {
+      const raw = Buffer.from(inline.data, 'base64');
+      const mime = inline.mimeType || 'audio/L16;rate=24000';
+      const isWavOrMp3 = mime.includes('wav') || mime.includes('mpeg') || mime.includes('mp3');
+      const audioBytes = isWavOrMp3 ? new Uint8Array(raw) : buildWavFromPcm16(new Uint8Array(raw));
+      return { bytes: audioBytes, mime: isWavOrMp3 ? mime : 'audio/wav' };
+    }
+  }
+  return null;
+}
+
 export async function POST(request: Request): Promise<Response> {
   try {
     const body = (await request.json().catch(() => ({}))) as { text?: string };
@@ -45,57 +86,39 @@ export async function POST(request: Request): Promise<Response> {
 
     const apiKey = process.env.GEMINI_API_KEY;
     if (!apiKey) {
-      return new Response(null, { status: 204 });
+      // 501 indica explícitamente "sin GEMINI_API_KEY" (nunca confundir con error temporal)
+      return new Response(JSON.stringify({ ok: false, reason: 'no_api_key' }), {
+        status: 501,
+        headers: { 'Content-Type': 'application/json' },
+      });
     }
 
-    const ai = new GoogleGenAI({ apiKey });
-    const response = await ai.models.generateContent({
-      model: 'gemini-2.5-flash-preview-tts',
-      contents: [
-        {
-          parts: [
-            {
-              text:
-                'Decí exactamente esta frase como LucIA, una joven uruguaya de Montevideo hablando a ritmo ágil, rápido y cotidiano (sin pausas largas ni tono lento), con acento uruguayo rioplatense bien marcado y natural (pronunciando suave la ll/y y entonación montevideana real):\n\n' +
-                text,
-            },
-          ],
+    // Hasta 2 intentos para absorber errores transitorios sin caer en voz robótica
+    let audio = await synthesizeWithGemini(apiKey, text).catch(() => null);
+    if (!audio) {
+      audio = await synthesizeWithGemini(apiKey, text);
+    }
+
+    if (audio) {
+      return new Response(Buffer.from(audio.bytes), {
+        status: 200,
+        headers: {
+          'Content-Type': audio.mime,
+          'Cache-Control': 'private, max-age=3600',
+          'X-Lucia-Engine': 'gemini-2.5-flash-preview-tts',
         },
-      ],
-      config: {
-        responseModalities: ['AUDIO'],
-        speechConfig: {
-          voiceConfig: {
-            prebuiltVoiceConfig: {
-              voiceName: 'Aoede',
-            },
-          },
-        },
-      },
+      });
+    }
+
+    return new Response(JSON.stringify({ ok: false, reason: 'empty_audio' }), {
+      status: 503,
+      headers: { 'Content-Type': 'application/json' },
     });
-
-    const parts = response.candidates?.[0]?.content?.parts || [];
-    for (const part of parts) {
-      const inline = part.inlineData;
-      if (inline?.data) {
-        const raw = Buffer.from(inline.data, 'base64');
-        const mime = inline.mimeType || 'audio/L16;rate=24000';
-        const isWavOrMp3 = mime.includes('wav') || mime.includes('mpeg') || mime.includes('mp3');
-        const audioBytes = isWavOrMp3 ? new Uint8Array(raw) : buildWavFromPcm16(new Uint8Array(raw));
-        return new Response(Buffer.from(audioBytes), {
-          status: 200,
-          headers: {
-            'Content-Type': isWavOrMp3 ? mime : 'audio/wav',
-            'Cache-Control': 'no-store',
-            'X-Lucia-Engine': 'gemini-2.5-flash-preview-tts',
-          },
-        });
-      }
-    }
-
-    return new Response(null, { status: 204 });
   } catch (err) {
-    console.error('[LucIA TTS] Fallback to browser voice:', err);
-    return new Response(null, { status: 204 });
+    console.error('[LucIA TTS] Transient Gemini error:', err);
+    return new Response(JSON.stringify({ ok: false, reason: 'gemini_transient_error' }), {
+      status: 503,
+      headers: { 'Content-Type': 'application/json' },
+    });
   }
 }

@@ -647,7 +647,7 @@ app.post('/api/lucia-tts', async (req, res) => {
   }
   const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey) {
-    res.sendStatus(204);
+    res.status(501).json({ ok: false, reason: 'no_api_key' });
     return;
   }
   try {
@@ -698,10 +698,10 @@ app.post('/api/lucia-tts', async (req, res) => {
         return;
       }
     }
-    res.sendStatus(204);
+    res.status(503).json({ ok: false, reason: 'empty_audio' });
   } catch (err) {
     console.error('[LucIA TTS local] Error:', err);
-    res.sendStatus(204);
+    res.status(503).json({ ok: false, reason: 'gemini_transient_error' });
   }
 });
 
