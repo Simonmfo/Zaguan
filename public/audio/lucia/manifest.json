@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-11-26T18:15:37.808Z",
+  "generatedAt": "2026-11-26T18:58:56.045Z",
   "clips": {
     "greeting-1": {
       "file": "/audio/lucia/greeting-1.m4a",
@@ -155,6 +155,16 @@
       "file": "/audio/lucia/emergency-1.m4a",
       "category": "emergency",
       "text": "Entendido, ya doy aviso urgente al apartamento y a la administración."
+    },
+    "farewell-zaguan-1": {
+      "file": "/audio/lucia/farewell-zaguan-1.m4a",
+      "category": "no-answer",
+      "text": "Disculpá, en este momento no te pudieron atender. Somos Zaguán, la portería inteligente de tu edificio. ¡Que tengas un excelente día!"
+    },
+    "farewell-zaguan-2": {
+      "file": "/audio/lucia/farewell-zaguan-2.m4a",
+      "category": "farewell",
+      "text": "Gracias por comunicarte. Somos Zaguán, la portería inteligente. Cuando necesites, volvé a tocar el timbre. ¡Hasta pronto!"
     }
   }
 }

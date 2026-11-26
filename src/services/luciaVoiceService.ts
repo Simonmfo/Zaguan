@@ -29,7 +29,8 @@ export type LuciaClipCategory =
   | 'show-camera'
   | 'connecting-resident'
   | 'out-of-scope'
-  | 'emergency';
+  | 'emergency'
+  | 'farewell';
 
 export interface LuciaRecordedClip {
   id: string;
@@ -50,7 +51,7 @@ export interface LuciaFallbackResult {
   replyText: string;
 }
 
-export const LUCIA_VOICE_LABEL = 'LucIA · 31 Audios Locales (+ Fallback Gemini)';
+export const LUCIA_VOICE_LABEL = 'LucIA · 33 Audios Locales (+ Fallback Gemini)';
 
 export const LUCIA_RECORDED_CLIPS: LuciaRecordedClip[] = [
   { id: 'greeting-1', category: 'greeting', file: '/audio/lucia/greeting-1.m4a', text: '¡Hola! Soy LucIA. ¿A qué apartamento venís o traés algún paquete?' },
@@ -91,6 +92,8 @@ export const LUCIA_RECORDED_CLIPS: LuciaRecordedClip[] = [
   { id: 'connecting-resident-1', category: 'connecting-resident', file: '/audio/lucia/connecting-resident-1.m4a', text: 'Aguardá un toque que ya te comunico con el apartamento.' },
   { id: 'out-of-scope-1', category: 'out-of-scope', file: '/audio/lucia/out-of-scope-1.m4a', text: 'Disculpá, solo gestiono ingresos y entregas. Decime a qué apartamento venís o si traés un paquete.' },
   { id: 'emergency-1', category: 'emergency', file: '/audio/lucia/emergency-1.m4a', text: 'Entendido, ya doy aviso urgente al apartamento y a la administración.' },
+  { id: 'farewell-zaguan-1', category: 'no-answer', file: '/audio/lucia/farewell-zaguan-1.m4a', text: 'Disculpá, en este momento no te pudieron atender. Somos Zaguán, la portería inteligente de tu edificio. ¡Que tengas un excelente día!' },
+  { id: 'farewell-zaguan-2', category: 'farewell', file: '/audio/lucia/farewell-zaguan-2.m4a', text: 'Gracias por comunicarte. Somos Zaguán, la portería inteligente. Cuando necesites, volvé a tocar el timbre. ¡Hasta pronto!' },
 ];
 
 let audioCtx: AudioContext | null = null;

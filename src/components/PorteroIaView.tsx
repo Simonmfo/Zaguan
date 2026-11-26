@@ -543,6 +543,22 @@ export function PorteroIaView({
       return;
     }
 
+    // 0.5 Despedida / agradecimiento del visitante → despedida institucional Zaguán
+    if (
+      lower.includes('chau') ||
+      lower.includes('chao') ||
+      lower.includes('hasta luego') ||
+      lower.includes('nos vemos') ||
+      lower.includes('adiós') ||
+      lower.includes('adios') ||
+      lower === 'gracias' ||
+      lower === 'muchas gracias'
+    ) {
+      const byeText = playRecordedCategory('farewell');
+      pushBubble('ia', byeText);
+      return;
+    }
+
     // 1. Código numérico de 4 dígitos (dictado por voz)
     const voicePinMatch = text.match(/(?:c[oó]digo|pin|clave|n[uú]mero)?\s*\b(\d{4})\b/i);
     if (

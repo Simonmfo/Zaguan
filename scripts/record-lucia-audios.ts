@@ -32,7 +32,8 @@ export interface LuciaClipSpec {
     | 'show-camera'
     | 'connecting-resident'
     | 'out-of-scope'
-    | 'emergency';
+    | 'emergency'
+    | 'farewell';
   text: string;
 }
 
@@ -75,6 +76,18 @@ export const LUCIA_CLIPS: LuciaClipSpec[] = [
   { id: 'connecting-resident-1', category: 'connecting-resident', text: 'Aguardá un toque que ya te comunico con el apartamento.' },
   { id: 'out-of-scope-1', category: 'out-of-scope', text: 'Disculpá, solo gestiono ingresos y entregas. Decime a qué apartamento venís o si traés un paquete.' },
   { id: 'emergency-1', category: 'emergency', text: 'Entendido, ya doy aviso urgente al apartamento y a la administración.' },
+
+  // Despedidas con marca Zaguán (si no pueden atender o al cerrar)
+  {
+    id: 'farewell-zaguan-1',
+    category: 'no-answer',
+    text: 'Disculpá, en este momento no te pudieron atender. Somos Zaguán, la portería inteligente de tu edificio. ¡Que tengas un excelente día!',
+  },
+  {
+    id: 'farewell-zaguan-2',
+    category: 'farewell',
+    text: 'Gracias por comunicarte. Somos Zaguán, la portería inteligente. Cuando necesites, volvé a tocar el timbre. ¡Hasta pronto!',
+  },
 ];
 
 const SAMPLE_RATE = 24000;
@@ -308,8 +321,8 @@ async function main() {
     }
   }
 
-  // Dividir los faltantes en lotes de hasta 5 frases (9 faltantes = solo 2 requests a Gemini!)
-  const batchSize = 5;
+  // Si faltan 1 o 2 clips, grabar de a 1 directo (más rápido y sin riesgo de bucle de silencio)
+  const batchSize = missing.length <= 2 ? 1 : 5;
   const batches: LuciaClipSpec[][] = [];
   for (let i = 0; i < missing.length; i += batchSize) {
     batches.push(missing.slice(i, i + batchSize));
